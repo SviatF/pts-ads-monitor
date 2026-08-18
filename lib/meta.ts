@@ -54,13 +54,15 @@ export async function getBusinessAccounts(): Promise<MetaAccount[]> {
   if (!businessId) throw new Error("META_BUSINESS_ID is not configured");
 
   const params = { fields: "id,name,account_status,currency,timezone_name", limit: "200" };
-  const [owned, clients] = await Promise.all([
+
+  const [owned, clients, directlyAccessible] = await Promise.all([
     readAllPages<MetaAccount>(`${businessId}/owned_ad_accounts`, params),
     readAllPages<MetaAccount>(`${businessId}/client_ad_accounts`, params),
+    readAllPages<MetaAccount>("me/adaccounts", params),
   ]);
 
   const unique = new Map<string, MetaAccount>();
-  [...owned, ...clients].forEach((account) => unique.set(account.id, account));
+  [...owned, ...clients, ...directlyAccessible].forEach((account) => unique.set(account.id, account));
   return [...unique.values()];
 }
 
