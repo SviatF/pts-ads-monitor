@@ -36,6 +36,10 @@ function ukrainianStatus(label: string) {
   return labels[label] || label;
 }
 
+export function newAccountAddedMessage(name: string, id: string) {
+  return `🟢 НОВИЙ РЕКЛАМНИЙ КАБІНЕТ ДОДАНО НА МОНІТОРИНГ\n\n<b>${escapeHtml(name)}</b>\n<code>${escapeHtml(id)}</code>\n\nСистема автоматично відстежуватиме статус кабінету, проблеми з оплатою та відхилені оголошення.`;
+}
+
 export function accountProblemMessage(input: {
   name: string;
   id: string;
