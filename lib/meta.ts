@@ -49,21 +49,33 @@ async function readAllPages<T>(firstPath: string, params: Record<string, string>
   return data;
 }
 
-export async function getBusinessAccounts(): Promise<MetaAccount[]> {
+const accountParams = { fields: "id,name,account_status,currency,timezone_name", limit: "200" };
+
+export async function getAccountDiscoveryDiagnostics() {
   const businessId = process.env.META_BUSINESS_ID;
   if (!businessId) throw new Error("META_BUSINESS_ID is not configured");
 
-  const params = { fields: "id,name,account_status,currency,timezone_name", limit: "200" };
-
   const [owned, clients, directlyAccessible] = await Promise.all([
-    readAllPages<MetaAccount>(`${businessId}/owned_ad_accounts`, params),
-    readAllPages<MetaAccount>(`${businessId}/client_ad_accounts`, params),
-    readAllPages<MetaAccount>("me/adaccounts", params),
+    readAllPages<MetaAccount>(`${businessId}/owned_ad_accounts`, accountParams),
+    readAllPages<MetaAccount>(`${businessId}/client_ad_accounts`, accountParams),
+    readAllPages<MetaAccount>("me/adaccounts", accountParams),
   ]);
 
   const unique = new Map<string, MetaAccount>();
   [...owned, ...clients, ...directlyAccessible].forEach((account) => unique.set(account.id, account));
-  return [...unique.values()];
+
+  return {
+    businessId,
+    owned,
+    clients,
+    directlyAccessible,
+    unique: [...unique.values()],
+  };
+}
+
+export async function getBusinessAccounts(): Promise<MetaAccount[]> {
+  const diagnostics = await getAccountDiscoveryDiagnostics();
+  return diagnostics.unique;
 }
 
 export async function getRejectedAds(accountId: string): Promise<MetaAd[]> {
