@@ -22,23 +22,42 @@ export async function sendTelegram(message: string) {
   if (!response.ok || !body.ok) throw new Error(body.description || "Telegram sendMessage failed");
 }
 
+function ukrainianStatus(label: string) {
+  const labels: Record<string, string> = {
+    ACTIVE: "Активний",
+    DISABLED: "Рекламний кабінет вимкнено",
+    UNSETTLED: "Проблема з оплатою / заборгованість",
+    PENDING_SETTLEMENT: "Очікується оплата",
+    IN_GRACE_PERIOD: "Пільговий період оплати",
+    PENDING_RISK_REVIEW: "Очікується перевірка ризиків",
+    PENDING_CLOSURE: "Очікує закриття",
+    CLOSED: "Закритий",
+  };
+  return labels[label] || label;
+}
+
 export function accountProblemMessage(input: {
   name: string;
   id: string;
   label: string;
   kind: string;
 }) {
-  const title = input.kind === "payment" ? "💳 META PAYMENT ALERT" : "🚨 META ACCOUNT ALERT";
-  const reason = input.kind === "payment" ? "Billing/payment state detected" : "Account requires attention";
-  return `${title}\n\n<b>${escapeHtml(input.name)}</b>\n<code>${escapeHtml(input.id)}</code>\n\nStatus: <b>${escapeHtml(input.label)}</b>\n${reason}`;
+  const isPayment = input.kind === "payment";
+  const title = isPayment ? "💳 ПРОБЛЕМА З ОПЛАТОЮ РК" : "🚨 ПРОБЛЕМА З РЕКЛАМНИМ КАБІНЕТОМ";
+  const status = ukrainianStatus(input.label);
+  const hint = isPayment
+    ? "Перевірте білінг, спосіб оплати та наявність заборгованості."
+    : "Перевірте рекламний кабінет у Meta Business Manager.";
+
+  return `${title}\n\n<b>${escapeHtml(input.name)}</b>\n<code>${escapeHtml(input.id)}</code>\n\nСтатус: <b>${escapeHtml(status)}</b>\n${hint}`;
 }
 
 export function accountRestoredMessage(name: string, id: string) {
-  return `🟢 META ACCOUNT RESTORED\n\n<b>${escapeHtml(name)}</b>\n<code>${escapeHtml(id)}</code>\n\nStatus: <b>ACTIVE</b>`;
+  return `🟢 РЕКЛАМНИЙ КАБІНЕТ ВІДНОВЛЕНО\n\n<b>${escapeHtml(name)}</b>\n<code>${escapeHtml(id)}</code>\n\nСтатус: <b>Активний</b>`;
 }
 
 export function rejectedAdsMessage(accountName: string, accountId: string, names: string[]) {
   const list = names.slice(0, 25).map((name) => `• <code>${escapeHtml(name)}</code>`).join("\n");
   const extra = names.length > 25 ? `\n…та ще ${names.length - 25}` : "";
-  return `❌ META ADS REJECTED\n\n<b>${escapeHtml(accountName)}</b>\n<code>${escapeHtml(accountId)}</code>\n\n${list}${extra}`;
+  return `❌ ВІДХИЛЕНО ОГОЛОШЕННЯ\n\nРекламний кабінет: <b>${escapeHtml(accountName)}</b>\n<code>${escapeHtml(accountId)}</code>\n\nВідхилені оголошення:\n${list}${extra}`;
 }
