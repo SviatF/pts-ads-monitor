@@ -7,7 +7,13 @@ import {
   type StoredRejectedAd,
   upsertAccounts,
 } from "@/lib/store";
-import { accountProblemMessage, accountRestoredMessage, rejectedAdsMessage, sendTelegram } from "@/lib/telegram";
+import {
+  accountProblemMessage,
+  accountRestoredMessage,
+  newAccountAddedMessage,
+  rejectedAdsMessage,
+  sendTelegram,
+} from "@/lib/telegram";
 
 export type MonitorResult = {
   ok: boolean;
@@ -30,7 +36,6 @@ export async function runMonitor(): Promise<MonitorResult> {
     errors: [] as string[],
   };
 
-  // Read existing state once, then write all 13 account statuses in one Supabase request.
   const previousAccounts = await listStoredAccounts();
   const previousByAccount = new Map(previousAccounts.map((row) => [row.meta_account_id, row]));
   const rows: StoredAccount[] = [];
@@ -52,8 +57,10 @@ export async function runMonitor(): Promise<MonitorResult> {
       status_changed_at: statusChangedAt,
     });
 
-    if (changed) {
-      if (status.kind === "active" && previous && previous.account_status !== 1) {
+    if (!previous) {
+      accountAlerts.push(newAccountAddedMessage(account.name, account.id));
+    } else if (changed) {
+      if (status.kind === "active" && previous.account_status !== 1) {
         accountAlerts.push(accountRestoredMessage(account.name, account.id));
       } else if (status.kind !== "active") {
         accountAlerts.push(accountProblemMessage({ name: account.name, id: account.id, label: status.label, kind: status.kind }));
@@ -63,7 +70,6 @@ export async function runMonitor(): Promise<MonitorResult> {
 
   await upsertAccounts(rows);
 
-  // Telegram status alerts are few and only happen on transitions.
   for (const message of accountAlerts) {
     try {
       await sendTelegram(message);
@@ -73,12 +79,10 @@ export async function runMonitor(): Promise<MonitorResult> {
     }
   }
 
-  // Read all already-known rejected ad IDs once instead of one Supabase request per ad.
   const seenRejectIds = await listSeenRejectedAdIds();
   const rejectsToRemember: StoredRejectedAd[] = [];
   const rejectAlerts: Array<{ accountName: string; accountId: string; names: string[] }> = [];
 
-  // One Meta request per account (plus pagination only when necessary).
   for (const account of accounts) {
     try {
       const previous = previousByAccount.get(account.id) || null;
