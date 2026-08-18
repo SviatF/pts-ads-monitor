@@ -1,4 +1,6 @@
+import { revalidatePath } from "next/cache";
 import { countRejectedAds, listStoredAccounts } from "@/lib/store";
+import { runMonitor } from "@/lib/run-monitor";
 
 export const dynamic = "force-dynamic";
 
@@ -6,6 +8,12 @@ function statusClass(kind: string) {
   if (kind === "active") return "ok";
   if (kind === "warning") return "warn";
   return "bad";
+}
+
+async function runMonitorNow() {
+  "use server";
+  await runMonitor();
+  revalidatePath("/");
 }
 
 export default async function Dashboard() {
@@ -25,9 +33,16 @@ export default async function Dashboard() {
 
   return (
     <main className="shell">
-      <div className="eyebrow">PTS Cooperation · Internal Tool</div>
-      <h1>Ads Health Monitor</h1>
-      <p className="subtitle">Централізований health-check рекламних кабінетів Meta та моніторинг нових rejected ads. Telegram отримує тільки зміни статусів, а не повтори кожні 10 хвилин.</p>
+      <div className="topRow">
+        <div>
+          <div className="eyebrow">PTS Cooperation · Internal Tool</div>
+          <h1>Ads Health Monitor</h1>
+          <p className="subtitle">Централізований health-check рекламних кабінетів Meta та моніторинг нових rejected ads. Telegram отримує тільки зміни статусів, а не повтори кожні 10 хвилин.</p>
+        </div>
+        <form action={runMonitorNow}>
+          <button className="runButton" type="submit">Run monitor now</button>
+        </form>
+      </div>
 
       <section className="grid">
         <div className="card"><div className="eyebrow">Accounts</div><div className="metric">{accounts.length}</div></div>
@@ -42,7 +57,7 @@ export default async function Dashboard() {
           <span className="statusPill">Auto-check · every 10 min</span>
         </div>
         {error ? <div className="empty bad">{error}</div> : accounts.length === 0 ? (
-          <div className="empty">Поки немає даних. Після налаштування ENV запусти <code>/api/monitor</code> один раз — система синхронізує всі РК з BM.</div>
+          <div className="empty">Поки немає даних. Натисни <strong>Run monitor now</strong> — система синхронізує всі РК з BM.</div>
         ) : (
           <table>
             <thead><tr><th>Account</th><th>ID</th><th>Status</th><th>Last check</th></tr></thead>
