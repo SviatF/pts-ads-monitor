@@ -8,6 +8,14 @@ export type StoredAccount = {
   status_changed_at: string;
 };
 
+export type StoredRejectedAd = {
+  ad_id: string;
+  ad_name: string;
+  meta_account_id: string;
+  account_name: string;
+  first_seen_at: string;
+};
+
 function config() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -55,22 +63,39 @@ export async function upsertAccount(row: StoredAccount) {
   });
 }
 
+export async function upsertAccounts(rows: StoredAccount[]) {
+  if (!rows.length) return [];
+  return request<StoredAccount[]>("ad_accounts?on_conflict=meta_account_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify(rows),
+  });
+}
+
 export async function hasSeenRejectedAd(adId: string): Promise<boolean> {
   const rows = await request<{ ad_id: string }[]>(`rejected_ads?ad_id=eq.${encodeURIComponent(adId)}&select=ad_id&limit=1`);
   return rows.length > 0;
 }
 
-export async function rememberRejectedAd(input: {
-  ad_id: string;
-  ad_name: string;
-  meta_account_id: string;
-  account_name: string;
-  first_seen_at: string;
-}) {
+export async function listSeenRejectedAdIds(): Promise<Set<string>> {
+  const rows = await request<{ ad_id: string }[]>("rejected_ads?select=ad_id");
+  return new Set(rows.map((row) => row.ad_id));
+}
+
+export async function rememberRejectedAd(input: StoredRejectedAd) {
   return request("rejected_ads?on_conflict=ad_id", {
     method: "POST",
     headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
     body: JSON.stringify(input),
+  });
+}
+
+export async function rememberRejectedAds(rows: StoredRejectedAd[]) {
+  if (!rows.length) return null;
+  return request("rejected_ads?on_conflict=ad_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify(rows),
   });
 }
 
