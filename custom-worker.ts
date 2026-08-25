@@ -3,6 +3,7 @@ import { default as handler } from "./.open-next/worker.js";
 
 type Env = {
   CRON_SECRET: string;
+  [key: string]: unknown;
 };
 
 export default {
@@ -17,11 +18,15 @@ export default {
     });
 
     ctx.waitUntil(
-      handler.fetch(request).then(async (response: Response) => {
+      handler.fetch(request, env, ctx).then(async (response: Response) => {
         if (!response.ok) {
           const body = await response.text();
           console.error("Scheduled monitor failed", response.status, body);
+          return;
         }
+
+        const body = await response.text();
+        console.log("Scheduled monitor completed", body);
       })
     );
   },
