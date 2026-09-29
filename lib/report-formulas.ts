@@ -42,16 +42,19 @@ async function valuesBatchUpdate(spreadsheetId: string, data: ValueUpdate[]) {
   );
 }
 
+// PTS master uses a Ukrainian/European spreadsheet locale, therefore
+// Google Sheets formula function arguments must be separated with semicolons.
+// Using commas causes #ERROR! / "Formula parse error" in copied reports.
 function derivedFormulas(row: number) {
   return {
-    D: `=IFERROR(1-C${row}/B${row},0)`,
-    F: `=IFERROR(E${row}/C${row},0)`,
-    I: `=IFERROR(H${row}/B${row},0)`,
-    K: `=IFERROR(J${row}/G${row},0)`,
-    N: `=IFERROR(L${row}/J${row},0)`,
-    P: `=IFERROR(O${row}/M${row},0)`,
-    Q: `=IFERROR(E${row}/J${row},0)`,
-    R: `=IFERROR(E${row}/M${row},0)`,
+    D: `=IFERROR(1-C${row}/B${row};0)`,
+    F: `=IFERROR(E${row}/C${row};0)`,
+    I: `=IFERROR(H${row}/B${row};0)`,
+    K: `=IFERROR(J${row}/G${row};0)`,
+    N: `=IFERROR(L${row}/J${row};0)`,
+    P: `=IFERROR(O${row}/M${row};0)`,
+    Q: `=IFERROR(E${row}/J${row};0)`,
+    R: `=IFERROR(E${row}/M${row};0)`,
   } as const;
 }
 
@@ -79,7 +82,7 @@ function pushTotal(data: ValueUpdate[], sheetTitle: string, row: number, groupRo
   for (const column of ADDITIVE_COLUMNS) {
     data.push({
       range: `${sheet}!${column}${row}`,
-      values: [[`=SUM(${groupRows.map((groupRow) => `${column}${groupRow}`).join(",")})`]],
+      values: [[`=SUM(${groupRows.map((groupRow) => `${column}${groupRow}`).join(";")})`]],
     });
   }
   pushDerived(data, sheetTitle, row);
@@ -92,7 +95,7 @@ function addDailyBlockFormulas(data: ValueUpdate[], sheetTitle: string, dataStar
   for (const offset of detailOffsets) {
     const row = dataStartRow + offset;
     // C is derived because managers only enter G/H/J/L/M/O. B/E come from ad platforms.
-    data.push({ range: `${sheet}!C${row}`, values: [[`=MAX(B${row}-H${row},0)`]] });
+    data.push({ range: `${sheet}!C${row}`, values: [[`=MAX(B${row}-H${row};0)`]] });
     pushDerived(data, sheetTitle, row);
   }
 
@@ -119,7 +122,7 @@ function addWeeklyFormulas(data: ValueUpdate[], sheetTitle: string) {
     const row = weeklyStart + offset;
     for (const column of ADDITIVE_COLUMNS) {
       const refs = dailyStarts.map((start) => `${column}${start + offset}`);
-      data.push({ range: `${sheet}!${column}${row}`, values: [[`=SUM(${refs.join(",")})`]] });
+      data.push({ range: `${sheet}!${column}${row}`, values: [[`=SUM(${refs.join(";")})`]] });
     }
     pushDerived(data, sheetTitle, row);
   }
