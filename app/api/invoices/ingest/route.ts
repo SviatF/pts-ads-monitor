@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasDeliveredInvoice, listInvoiceSubscriptions, rememberDeliveredInvoice } from "@/lib/invoice-store";
-import { sendInvoicePdfToChat } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml, sendInvoicePdfToChat } from "@/lib/invoice-telegram";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -26,6 +26,18 @@ export async function POST(request: NextRequest) {
   if (!accountId || !invoiceKey || !(file instanceof File)) {
     return NextResponse.json({ error: "meta_account_id, invoice_key and pdf are required" }, { status: 400 });
   }
+  if (!/^\d{5,25}$/.test(accountId)) {
+    return NextResponse.json({ error: "Invalid Meta ad account ID" }, { status: 400 });
+  }
+  if (!/^[A-Za-z0-9._:-]{3,128}$/.test(invoiceKey)) {
+    return NextResponse.json({ error: "Invalid invoice key" }, { status: 400 });
+  }
+  if (invoiceDate && !/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)) {
+    return NextResponse.json({ error: "invoice_date must be YYYY-MM-DD" }, { status: 400 });
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    return NextResponse.json({ error: "PDF is too large" }, { status: 413 });
+  }
   if (file.type && file.type !== "application/pdf") {
     return NextResponse.json({ error: "Only PDF files are accepted" }, { status: 415 });
   }
@@ -44,9 +56,13 @@ export async function POST(request: NextRequest) {
 
     const amount = amountRaw ? Number(amountRaw) : null;
     const amountText = Number.isFinite(amount) && amount !== null
-      ? `${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })}${currency ? ` ${currency}` : ""}`
-      : currency || "—";
-    const caption = `🧾 <b>NEW META INVOICE</b>\n\nAccount: <b>${subscription.account_name}</b>\nID: <code>${accountId}</code>\nInvoice: <code>${invoiceKey}</code>${invoiceDate ? `\nDate: <b>${invoiceDate}</b>` : ""}\nAmount: <b>${amountText}</b>\n\n✅ Original Meta PDF`;
+      ? `${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })}${currency ? ` ${escapeTelegramHtml(currency)}` : ""}`
+      : currency ? escapeTelegramHtml(currency) : "—";
+    const safeName = escapeTelegramHtml(subscription.account_name);
+    const safeAccountId = escapeTelegramHtml(accountId);
+    const safeInvoiceKey = escapeTelegramHtml(invoiceKey);
+    const safeDate = invoiceDate ? escapeTelegramHtml(invoiceDate) : null;
+    const caption = `🧾 <b>NEW META INVOICE</b>\n\nAccount: <b>${safeName}</b>\nID: <code>${safeAccountId}</code>\nInvoice: <code>${safeInvoiceKey}</code>${safeDate ? `\nDate: <b>${safeDate}</b>` : ""}\nAmount: <b>${amountText}</b>\n\n✅ Original Meta PDF`;
 
     const sent = await sendInvoicePdfToChat({
       chatId: subscription.telegram_chat_id,
