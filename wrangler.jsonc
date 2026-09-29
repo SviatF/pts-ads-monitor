@@ -4,6 +4,7 @@
   "main": "./custom-worker.ts",
   "compatibility_date": "2026-08-18",
   "compatibility_flags": ["nodejs_compat"],
+  "keep_vars": true,
   "vars": {
     "GOOGLE_REPORTS_FOLDER_ID": "1JyQf2_G8bNSpB90pojlk57eCtrnT8Uyq",
     "GOOGLE_SERVICE_ACCOUNT_EMAIL": "service-ads-monitor@ads-monitor-510115.iam.gserviceaccount.com",
