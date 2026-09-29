@@ -1,23 +1,38 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const localEnvPath = path.resolve('.env.invoice-agent');
-if (existsSync(localEnvPath)) {
-  try {
-    process.loadEnvFile(localEnvPath);
-    console.log(`Invoice supervisor loaded env from ${localEnvPath}`);
-  } catch (error) {
-    console.error(`Invoice supervisor failed to load ${localEnvPath}:`, error);
-    process.exit(1);
+function loadEnvFile(filePath) {
+  if (!existsSync(filePath)) return;
+  const text = readFileSync(filePath, 'utf8');
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const index = line.indexOf('=');
+    if (index <= 0) continue;
+    const key = line.slice(0, index).trim();
+    let value = line.slice(index + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = value;
   }
+  console.log(`Invoice supervisor loaded env from ${filePath}`);
 }
+
+loadEnvFile(path.resolve(process.env.INVOICE_ENV_FILE || '.env.invoice-agent'));
 
 const maxCrashes = Math.max(1, Number(process.env.INVOICE_MAX_CRASHES_PER_RUN || 3));
 const maxMinutes = Math.max(1, Number(process.env.INVOICE_MAX_RUNTIME_MINUTES || 10));
 const maxRuntimeMs = maxMinutes * 60_000;
+const browserMode = String(process.env.INVOICE_BROWSER || 'chromium').toLowerCase();
+const runnerScript = browserMode === 'chrome'
+  ? 'scripts/invoice-runner.mjs'
+  : 'scripts/invoice-runner-chromium.mjs';
 
-const child = spawn(process.execPath, ['scripts/invoice-runner.mjs'], {
+console.log(`Invoice supervisor browser mode: ${browserMode}`);
+
+const child = spawn(process.execPath, [runnerScript], {
   stdio: ['inherit', 'pipe', 'pipe'],
   env: process.env,
 });
