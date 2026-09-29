@@ -1,5 +1,6 @@
 import { ensureProjectReportLifecycle, createProjectReport as createWithServiceAccount, REPORTING_GOALS } from "@/lib/google-reporting";
 import { getGoogleUserAccessToken, hasGoogleUserOAuth } from "@/lib/google-oauth";
+import { applyReportFormulas } from "@/lib/report-formulas";
 
 export { REPORTING_GOALS };
 
@@ -71,6 +72,7 @@ export async function createProjectReport(input: {
     customGoal: input.customGoal,
     reportingStartDate: input.startDate,
   });
+  await applyReportFormulas(copied.id);
 
   const start = parseIsoDate(input.startDate);
   return {
