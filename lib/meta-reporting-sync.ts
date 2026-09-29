@@ -15,6 +15,12 @@ type MetaInsight = {
   date_stop?: string;
 };
 
+type MetaPage<T> = {
+  data?: T[];
+  paging?: { next?: string };
+  error?: { message?: string };
+};
+
 type Channel = "direct" | "leadform" | "quiz" | "site";
 
 const CHANNEL_ROW_OFFSET: Record<Channel, number> = {
@@ -71,10 +77,10 @@ async function metaGraphAll<T>(path: string, params: Record<string, string>) {
   const rows: T[] = [];
   let next: string | null = url.toString();
   while (next) {
-    const response = await fetch(next, { cache: "no-store" });
-    const body = await response.json();
-    if (!response.ok || body?.error) {
-      throw new Error(body?.error?.message || `Meta API request failed (${response.status})`);
+    const response: Response = await fetch(next, { cache: "no-store" });
+    const body = (await response.json()) as MetaPage<T>;
+    if (!response.ok || body.error) {
+      throw new Error(body.error?.message || `Meta API request failed (${response.status})`);
     }
     rows.push(...(body.data || []));
     next = body.paging?.next || null;
