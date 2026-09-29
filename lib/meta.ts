@@ -70,6 +70,26 @@ async function graph<T>(path: string, params: Record<string, string> = {}): Prom
   return body as T;
 }
 
+async function graphProbe(path: string, params: Record<string, string> = {}) {
+  const url = new URL(`${GRAPH_BASE}/${path.replace(/^\//, "")}`);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  url.searchParams.set("access_token", token());
+
+  const response = await fetch(url, { cache: "no-store" });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || body?.error) {
+    const error = body?.error;
+    return {
+      ok: false as const,
+      status: response.status,
+      error: error?.message || `Meta API request failed: ${response.status}`,
+      code: error?.code ?? null,
+      subcode: error?.error_subcode ?? null,
+    };
+  }
+  return { ok: true as const, status: response.status, body };
+}
+
 async function readAllPages<T>(firstPath: string, params: Record<string, string>): Promise<T[]> {
   const first = await graph<{ data: T[]; paging?: { next?: string } }>(firstPath, params);
   const data = [...(first.data || [])];
@@ -154,6 +174,27 @@ export async function getBusinessInvoices(input: { startDate: string; endDate: s
 
   const invoices = await readAllPages<MetaBusinessInvoice>(`${businessId}/business_invoices`, params);
   return { businessId, graphVersion: GRAPH_VERSION, invoices };
+}
+
+export async function getAdAccountBillingDiagnostics(accountIdInput: string) {
+  const accountId = accountIdInput.replace(/^act_/, "");
+  const objectId = `act_${accountId}`;
+
+  const account = await graph<Record<string, unknown>>(objectId, {
+    fields: "id,name,business,business_name,account_status,amount_spent,balance,currency,spend_cap,timezone_name",
+  });
+
+  const probes = await Promise.all([
+    graphProbe(`${objectId}/transactions`, { limit: "10" }).then((result) => ({ edge: "transactions", documented: false, result })),
+    graphProbe(`${objectId}/payment_activity`, { limit: "10" }).then((result) => ({ edge: "payment_activity", documented: false, result })),
+  ]);
+
+  return {
+    graphVersion: GRAPH_VERSION,
+    accountId,
+    account,
+    probes,
+  };
 }
 
 export function classifyAccountStatus(code: number) {
