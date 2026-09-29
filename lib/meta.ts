@@ -15,6 +15,37 @@ export type MetaAd = {
   effective_status: string;
 };
 
+export type MetaBusinessInvoice = {
+  id?: string;
+  invoice_id?: string;
+  billing_period?: string;
+  invoice_date?: string;
+  due_date?: string;
+  payment_status?: string;
+  amount_due?: string | number | null;
+  type?: string;
+  invoice_type?: string;
+  entity?: string;
+  payment_term?: string;
+  download_uri?: string;
+  cdn_download_uri?: string;
+  billed_amount_details?: {
+    currency?: string;
+    net_amount?: string | number;
+    tax_amount?: string | number;
+    total_amount?: string | number;
+  };
+  campaigns?: {
+    data?: Array<{
+      campaign_id?: string;
+      campaign_name?: string;
+      billed_amount_details?: Record<string, unknown>;
+      [key: string]: unknown;
+    }>;
+  };
+  [key: string]: unknown;
+};
+
 function token() {
   const value = process.env.META_ACCESS_TOKEN;
   if (!value) throw new Error("META_ACCESS_TOKEN is not configured");
@@ -29,7 +60,12 @@ async function graph<T>(path: string, params: Record<string, string> = {}): Prom
   const response = await fetch(url, { cache: "no-store" });
   const body = await response.json();
   if (!response.ok || body?.error) {
-    throw new Error(body?.error?.message || `Meta API request failed: ${response.status}`);
+    const error = body?.error;
+    const message = error?.message || `Meta API request failed: ${response.status}`;
+    const details = [error?.type, error?.code != null ? `code=${error.code}` : null, error?.error_subcode != null ? `subcode=${error.error_subcode}` : null]
+      .filter(Boolean)
+      .join(", ");
+    throw new Error(details ? `${message} (${details})` : message);
   }
   return body as T;
 }
@@ -84,6 +120,40 @@ export async function getRejectedAds(accountId: string): Promise<MetaAd[]> {
     effective_status: JSON.stringify(["DISAPPROVED"]),
     limit: "200",
   });
+}
+
+export async function getBusinessInvoices(input: { startDate: string; endDate: string; invoiceId?: string | null }) {
+  const businessId = process.env.META_BUSINESS_ID;
+  if (!businessId) throw new Error("META_BUSINESS_ID is not configured");
+
+  const fields = [
+    "id",
+    "invoice_id",
+    "billing_period",
+    "invoice_date",
+    "due_date",
+    "payment_status",
+    "amount_due",
+    "type",
+    "invoice_type",
+    "entity",
+    "payment_term",
+    "billed_amount_details",
+    "download_uri",
+    "cdn_download_uri",
+    "campaigns",
+  ].join(",");
+
+  const params: Record<string, string> = {
+    fields,
+    start_date: input.startDate,
+    end_date: input.endDate,
+    limit: "100",
+  };
+  if (input.invoiceId) params.invoice_id = input.invoiceId;
+
+  const invoices = await readAllPages<MetaBusinessInvoice>(`${businessId}/business_invoices`, params);
+  return { businessId, graphVersion: GRAPH_VERSION, invoices };
 }
 
 export function classifyAccountStatus(code: number) {

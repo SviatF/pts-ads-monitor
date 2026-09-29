@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBusinessAccounts } from "@/lib/meta";
+import { getBusinessAccounts, getBusinessInvoices } from "@/lib/meta";
 import {
   clearInvoiceSetupSession,
   disableInvoiceSubscriptions,
@@ -31,6 +31,10 @@ function parseDate(value: string) {
   return null;
 }
 
+function isoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
 export async function POST(request: NextRequest) {
   if (!webhookAuthorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -39,6 +43,47 @@ export async function POST(request: NextRequest) {
   const chatId = message?.chat?.id != null ? String(message.chat.id) : null;
   const text = typeof message?.text === "string" ? message.text.trim() : "";
   if (!chatId || !text) return NextResponse.json({ ok: true });
+
+  if (text === "/invoice_api_test" || text.startsWith("/invoice_api_test@")) {
+    const end = new Date();
+    const start = new Date(end);
+    start.setUTCDate(start.getUTCDate() - 180);
+
+    try {
+      const result = await getBusinessInvoices({ startDate: isoDate(start), endDate: isoDate(end) });
+      const invoices = result.invoices;
+      const pdfCount = invoices.filter((invoice) => Boolean(invoice.download_uri || invoice.cdn_download_uri)).length;
+      const sample = invoices
+        .slice(0, 5)
+        .map((invoice) => {
+          const id = invoice.invoice_id || invoice.id || "—";
+          const date = invoice.invoice_date || invoice.billing_period || "—";
+          const amount = invoice.billed_amount_details?.total_amount ?? invoice.amount_due ?? "—";
+          const currency = invoice.billed_amount_details?.currency || "";
+          const pdf = invoice.download_uri || invoice.cdn_download_uri ? "✅ PDF" : "⚪ без PDF URL";
+          return `• <code>${escapeTelegramHtml(String(id))}</code> · ${escapeTelegramHtml(String(date))} · <b>${escapeTelegramHtml(String(amount))}${currency ? ` ${escapeTelegramHtml(currency)}` : ""}</b> · ${pdf}`;
+        })
+        .join("\n");
+
+      const verdict = invoices.length === 0
+        ? "⚠️ Meta API доступний, але за останні 180 днів invoices не повернув. Це часто означає, що бізнес не використовує month-end invoicing / credit line для цих оплат."
+        : pdfCount > 0
+          ? "✅ <b>УСПІХ: Meta API повертає invoice PDF URL.</b> Browser automation нам не потрібен."
+          : "🟡 Invoices повертаються, але PDF URL у відповіді немає. Треба перевірити доступні поля/роль finance.";
+
+      await sendTelegramToChat(
+        chatId,
+        `🧪 <b>META INVOICE API TEST</b>\n\nBusiness: <code>${escapeTelegramHtml(result.businessId)}</code>\nGraph: <code>${escapeTelegramHtml(result.graphVersion)}</code>\nPeriod: ${isoDate(start)} → ${isoDate(end)}\nInvoices: <b>${invoices.length}</b>\nWith PDF URL: <b>${pdfCount}</b>\n\n${verdict}${sample ? `\n\n<b>Перші результати:</b>\n${sample}` : ""}`
+      );
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      await sendTelegramToChat(
+        chatId,
+        `❌ <b>META INVOICE API TEST FAILED</b>\n\n<code>${escapeTelegramHtml(messageText)}</code>\n\nЦе дасть нам точну причину: permission/finance role/endpoint/тип billing.`
+      );
+    }
+    return NextResponse.json({ ok: true });
+  }
 
   if (text === "/start_invoices" || text.startsWith("/start_invoices@")) {
     await setInvoiceSetupSession({
