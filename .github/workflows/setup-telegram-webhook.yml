@@ -1,0 +1,28 @@
+name: Setup Telegram Webhook
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure webhook
+        env:
+          APP_URL: ${{ secrets.INVOICE_APP_BASE_URL }}
+          RUNNER_SECRET: ${{ secrets.INVOICE_RUNNER_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$APP_URL" || { echo "Missing INVOICE_APP_BASE_URL"; exit 1; }
+          test -n "$RUNNER_SECRET" || { echo "Missing INVOICE_RUNNER_SECRET"; exit 1; }
+
+          RESPONSE=$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $RUNNER_SECRET" \
+            "${APP_URL%/}/api/telegram/setup")
+
+          echo "$RESPONSE"
