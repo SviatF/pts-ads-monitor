@@ -21,7 +21,7 @@ function authorized(request: NextRequest) {
 }
 
 async function configureWebhook(request: NextRequest) {
-  const webhookUrl = `${request.nextUrl.origin}/api/telegram/webhook`;
+  const webhookUrl = `${request.nextUrl.origin}/api/telegram`;
   const secretToken = telegramWebhookSecret();
   if (!secretToken) throw new Error("TELEGRAM_WEBHOOK_SECRET or INVOICE_RUNNER_SECRET is not configured");
 
