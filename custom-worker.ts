@@ -44,11 +44,11 @@ export default {
     hydrateProcessEnv(env);
     const tasks: Promise<unknown>[] = [callInternal("/api/monitor", env, ctx)];
 
-    // Cron itself runs every 10 minutes. Lifecycle work is deliberately executed
-    // only once at 07:00 Europe/Kyiv, including DST-safe timezone handling.
+    // Cron runs every 10 minutes. At 07:00 Europe/Kyiv run the complete reporting
+    // morning workflow: lifecycle (monthly/new week) -> previous-day Meta sync -> Telegram status.
     const { hour, minute } = kyivClock();
     if (hour === 7 && minute < 10) {
-      tasks.push(callInternal("/api/reporting/lifecycle", env, ctx));
+      tasks.push(callInternal("/api/reporting/morning", env, ctx));
     }
 
     ctx.waitUntil(Promise.allSettled(tasks).then((results) => {
