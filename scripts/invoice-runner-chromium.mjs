@@ -1,9 +1,46 @@
 import { chromium } from 'playwright';
+import { execFile } from 'node:child_process';
+import { unlink } from 'node:fs/promises';
+import { promisify } from 'node:util';
 
+const execFileAsync = promisify(execFile);
 const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+
+async function prepareDedicatedProfile(userDataDir) {
+  if (!userDataDir || process.platform === 'win32') return;
+
+  let profileInUse = false;
+  try {
+    const { stdout } = await execFileAsync('pgrep', ['-f', userDataDir]);
+    profileInUse = Boolean(stdout.trim());
+  } catch (error) {
+    if (error?.code !== 1) {
+      console.warn(`Invoice browser: profile process check warning: ${error?.message || error}`);
+    }
+  }
+
+  if (profileInUse) {
+    console.warn('Invoice browser: automation profile is still in use by another browser process');
+    return;
+  }
+
+  let removed = 0;
+  for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    await unlink(`${userDataDir}/${name}`).then(() => {
+      removed += 1;
+    }).catch((error) => {
+      if (error?.code !== 'ENOENT') {
+        console.warn(`Invoice browser: could not remove ${name}: ${error?.message || error}`);
+      }
+    });
+  }
+  if (removed) console.log(`Invoice browser: cleaned ${removed} stale profile lock file(s)`);
+}
 
 chromium.launchPersistentContext = async (userDataDir, options = {}) => {
   const browserMode = String(process.env.INVOICE_BROWSER || 'chromium').toLowerCase();
+  await prepareDedicatedProfile(userDataDir);
+
   if (browserMode === 'chrome') {
     console.log('Invoice browser: Google Chrome');
     return originalLaunchPersistentContext(userDataDir, options);
@@ -15,7 +52,7 @@ chromium.launchPersistentContext = async (userDataDir, options = {}) => {
     return await originalLaunchPersistentContext(userDataDir, chromiumOptions);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (/Executable doesn't exist|browserType\.launchPersistentContext/i.test(message) && /playwright/i.test(message)) {
+    if (/Executable doesn't exist|executable.*not found/i.test(message)) {
       console.error('Playwright Chromium is not installed. Run: npx playwright install chromium');
     }
     throw error;
