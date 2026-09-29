@@ -5,11 +5,9 @@ import crypto from 'node:crypto';
 const APP_BASE_URL = process.env.INVOICE_APP_BASE_URL;
 const RUNNER_SECRET = process.env.INVOICE_RUNNER_SECRET;
 const META_STORAGE_STATE = process.env.META_STORAGE_STATE || 'meta-storage-state.json';
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!APP_BASE_URL || !RUNNER_SECRET || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('INVOICE_APP_BASE_URL, INVOICE_RUNNER_SECRET, SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
+if (!APP_BASE_URL || !RUNNER_SECRET) {
+  throw new Error('INVOICE_APP_BASE_URL and INVOICE_RUNNER_SECRET are required');
 }
 
 async function appApi(path) {
@@ -21,19 +19,8 @@ async function appApi(path) {
 }
 
 async function listSubscriptions() {
-  const url = new URL('/rest/v1/invoice_subscriptions', SUPABASE_URL);
-  url.searchParams.set('select', 'telegram_chat_id,meta_account_id,account_name,currency,start_date,enabled');
-  url.searchParams.set('enabled', 'eq.true');
-  url.searchParams.set('order', 'start_date.asc');
-
-  const response = await fetch(url, {
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-    },
-  });
-  if (!response.ok) throw new Error(`Supabase subscriptions failed: ${response.status} ${await response.text()}`);
-  return response.json();
+  const payload = await appApi('/api/invoices/subscriptions');
+  return payload.subscriptions || [];
 }
 
 function groupSubscriptions(rows) {
