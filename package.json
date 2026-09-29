@@ -9,7 +9,8 @@
     "start": "next start",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "invoice:run": "node scripts/invoice-runner.mjs"
   },
   "dependencies": {
     "next": "15.5.2",
@@ -21,6 +22,7 @@
     "@types/node": "22.15.30",
     "@types/react": "19.1.6",
     "@types/react-dom": "19.1.5",
+    "playwright": "^1.55.0",
     "typescript": "5.8.3",
     "wrangler": "latest"
   }
