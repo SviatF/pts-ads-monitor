@@ -71,11 +71,23 @@ create table if not exists public.reporting_configs (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.reporting_telegram_subscriptions (
+  id bigserial primary key,
+  telegram_chat_id text not null,
+  meta_account_id text not null references public.reporting_configs(meta_account_id) on delete cascade,
+  account_name text not null,
+  enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (telegram_chat_id, meta_account_id)
+);
+
 create index if not exists ad_accounts_status_kind_idx on public.ad_accounts(status_kind);
 create index if not exists rejected_ads_meta_account_id_idx on public.rejected_ads(meta_account_id);
 create index if not exists invoice_subscriptions_enabled_idx on public.invoice_subscriptions(enabled, meta_account_id);
 create index if not exists invoice_documents_account_idx on public.invoice_documents(meta_account_id, invoice_date desc);
 create index if not exists reporting_configs_status_idx on public.reporting_configs(status);
+create index if not exists reporting_telegram_subscriptions_enabled_idx on public.reporting_telegram_subscriptions(enabled, meta_account_id);
 
 alter table public.ad_accounts enable row level security;
 alter table public.rejected_ads enable row level security;
@@ -83,5 +95,6 @@ alter table public.invoice_subscriptions enable row level security;
 alter table public.invoice_setup_sessions enable row level security;
 alter table public.invoice_documents enable row level security;
 alter table public.reporting_configs enable row level security;
+alter table public.reporting_telegram_subscriptions enable row level security;
 
 -- The app uses SUPABASE_SERVICE_ROLE_KEY server-side only, so no public policies are required.
