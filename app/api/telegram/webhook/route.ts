@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { telegramWebhookSecret } from "@/lib/telegram-webhook-secret";
+import { POST as handleTelegramPost } from "../route";
 
 export const dynamic = "force-dynamic";
 
@@ -15,19 +16,14 @@ export async function POST(request: NextRequest) {
 
   const body = await request.text();
   const target = new URL("/api/telegram", request.url);
-  const response = await fetch(target, {
+  const forwarded = new NextRequest(target, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-telegram-bot-api-secret-token": rawSecret,
     },
     body,
-    cache: "no-store",
   });
 
-  const text = await response.text();
-  return new NextResponse(text, {
-    status: response.status,
-    headers: { "Content-Type": response.headers.get("content-type") || "application/json" },
-  });
+  return handleTelegramPost(forwarded);
 }
