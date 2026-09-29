@@ -41,10 +41,13 @@ export default async function ReportingSetupPage({
     );
   }
 
+  const currentAccountId = account.meta_account_id;
+  const currentAccountName = account.name;
+
   async function createReport(formData: FormData) {
     "use server";
 
-    const projectName = String(formData.get("projectName") || account.name).trim();
+    const projectName = String(formData.get("projectName") || currentAccountName).trim();
     const goalKey = String(formData.get("goalKey") || "sale");
     const customGoal = String(formData.get("customGoal") || "").trim();
     const startDate = String(formData.get("startDate") || currentWeekStart());
@@ -53,7 +56,7 @@ export default async function ReportingSetupPage({
     try {
       const report = await createProjectReport({ projectName, goalKey, customGoal, startDate });
       await upsertReportingConfig({
-        meta_account_id: account.meta_account_id,
+        meta_account_id: currentAccountId,
         project_name: projectName,
         goal_key: goalKey,
         goal_label: report.goalLabel,
@@ -66,13 +69,13 @@ export default async function ReportingSetupPage({
         status: "configured",
       });
       revalidatePath("/");
-      revalidatePath(`/reporting/${encodeURIComponent(account.meta_account_id)}`);
+      revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
       redirect("/");
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : String(error);
     }
 
-    redirect(`/reporting/${encodeURIComponent(account.meta_account_id)}?error=${encodeURIComponent(errorMessage)}`);
+    redirect(`/reporting/${encodeURIComponent(currentAccountId)}?error=${encodeURIComponent(errorMessage)}`);
   }
 
   return (
