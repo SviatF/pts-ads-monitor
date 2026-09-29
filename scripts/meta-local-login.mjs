@@ -25,5 +25,7 @@ await page.goto('https://business.facebook.com/billing_hub/payment_activity', {
 
 process.stdin.resume();
 await new Promise((resolve) => process.stdin.once('data', resolve));
+process.stdin.pause();
 await context.close();
 console.log('Meta persistent profile saved.');
+process.exit(0);
