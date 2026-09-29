@@ -4,6 +4,10 @@ function botToken() {
   return token;
 }
 
+export function escapeTelegramHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 export async function sendTelegramToChat(chatId: string, text: string) {
   const response = await fetch(`https://api.telegram.org/bot${botToken()}/sendMessage`, {
     method: "POST",
