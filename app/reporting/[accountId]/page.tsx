@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getStoredAccount } from "@/lib/store";
-import { createProjectReport, REPORTING_GOALS } from "@/lib/google-reporting";
+import { createProjectReport, REPORTING_GOALS } from "@/lib/google-reporting-user";
 import { getReportingConfig, upsertReportingConfig } from "@/lib/reporting-store";
 
 export const dynamic = "force-dynamic";
