@@ -1,4 +1,6 @@
 import { classifyAccountStatus, getBusinessAccounts, getRejectedAds } from "@/lib/meta";
+import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
+import { listReportingConfigs } from "@/lib/reporting-store";
 import {
   listSeenRejectedAdIds,
   listStoredAccounts,
@@ -22,6 +24,7 @@ export type MonitorResult = {
   accountAlerts: number;
   rejectedAdsFound: number;
   rejectedAlerts: number;
+  reportingSheetsCreated: number;
   errors: string[];
 };
 
@@ -33,6 +36,7 @@ export async function runMonitor(): Promise<MonitorResult> {
     accountAlerts: 0,
     rejectedAdsFound: 0,
     rejectedAlerts: 0,
+    reportingSheetsCreated: 0,
     errors: [] as string[],
   };
 
@@ -77,6 +81,33 @@ export async function runMonitor(): Promise<MonitorResult> {
     } catch (error) {
       result.errors.push(`Telegram status alert: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // Reporting lifecycle is idempotent. Every monitor run checks configured projects,
+  // creates missing 01–07 / 08–14 / 15–21 / 22–28 / 29–month-end tabs,
+  // and creates the monthly aggregation tab only after that month has closed.
+  try {
+    const reportingConfigs = await listReportingConfigs();
+    for (const config of reportingConfigs) {
+      if (!config.report_file_id || config.status !== "configured") continue;
+      try {
+        const lifecycle = await ensureProjectReportLifecycle({
+          spreadsheetId: config.report_file_id,
+          projectName: config.project_name,
+          goalKey: config.goal_key,
+          goalLabel: config.goal_label,
+          reportingStartDate: config.report_start_date,
+          now: new Date(startedAt),
+        });
+        result.reportingSheetsCreated += lifecycle.created.length;
+      } catch (error) {
+        result.errors.push(
+          `${config.project_name} reporting: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  } catch (error) {
+    result.errors.push(`Reporting configs: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const seenRejectIds = await listSeenRejectedAdIds();
