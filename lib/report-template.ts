@@ -1,4 +1,4 @@
-export const PTS_REPORT_TEMPLATE_VERSION = "pts-performance-v1";
+export const PTS_REPORT_TEMPLATE_VERSION = "pts-performance-v2-four-periods";
 
 // Source-of-truth workbook: Example-Zvit | Performance.
 // IMPORTANT: reports are created only by copying the master Google Sheet.
@@ -35,6 +35,27 @@ export const PTS_REPORT_TEMPLATE = {
   },
 } as const;
 
+export type DailyBlock = { dateRow: number; headerRow: number; dataStartRow: number; dataEndRow: number };
+
+// The master contains seven daily sections. Our fixed monthly cadence is
+// 01–07, 08–15, 16–22 and 23–month-end, so the 2nd period needs 8 daily
+// sections and the final period can need up to 9. Extra sections are appended
+// by copying the last master daily block and follow a 20-row stride.
+export function dailyBlocksForDays(days: number): DailyBlock[] {
+  const base = PTS_REPORT_TEMPLATE.daily.blocks.map((block) => ({ ...block })) as DailyBlock[];
+  const needed = Math.max(1, Math.min(9, days));
+  while (base.length < needed) {
+    const previous = base[base.length - 1];
+    base.push({
+      dateRow: previous.dateRow + 20,
+      headerRow: previous.headerRow + 20,
+      dataStartRow: previous.dataStartRow + 20,
+      dataEndRow: previous.dataEndRow + 20,
+    });
+  }
+  return base.slice(0, needed);
+}
+
 // Reference palette extracted from the workbook. This is documentation/validation only;
 // generation must still use Drive copy rather than recreating these styles in code.
 export const PTS_REPORT_STYLE_REFERENCE = {
@@ -52,10 +73,10 @@ export const PTS_REPORT_STYLE_REFERENCE = {
   bodyFontSize: 9,
 } as const;
 
-export function dynamicGoalHeaderCells() {
+export function dynamicGoalHeaderCells(days = 7) {
   const rows = [
     PTS_REPORT_TEMPLATE.weekly.headerRow,
-    ...PTS_REPORT_TEMPLATE.daily.blocks.map((block) => block.headerRow),
+    ...dailyBlocksForDays(days).map((block) => block.headerRow),
   ];
   return rows.flatMap((row) => [
     `${PTS_REPORT_TEMPLATE.dynamicColumns.finalGoal}${row}`,
