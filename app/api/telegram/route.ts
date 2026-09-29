@@ -9,6 +9,7 @@ import {
   upsertInvoiceSubscription,
 } from "@/lib/invoice-store";
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+import { handleReportingTelegramCommand } from "@/lib/reporting-telegram";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,10 @@ export async function POST(request: NextRequest) {
   const chatId = message?.chat?.id != null ? String(message.chat.id) : null;
   const text = typeof message?.text === "string" ? message.text.trim() : "";
   if (!chatId || !text) return NextResponse.json({ ok: true });
+
+  if (await handleReportingTelegramCommand(chatId, text)) {
+    return NextResponse.json({ ok: true });
+  }
 
   const paymentTestArg = commandArgument(text, "payment_api_test");
   if (paymentTestArg !== null) {
