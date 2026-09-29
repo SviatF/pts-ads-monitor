@@ -1,1 +1,0 @@
-The runner processes only explicitly subscribed ad accounts. It should never enumerate every ad account from the Business Manager. Duplicate documents are filtered by the server before delivery.
