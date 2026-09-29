@@ -6,10 +6,23 @@ type Env = {
   [key: string]: unknown;
 };
 
+function hydrateProcessEnv(env: Env) {
+  for (const [key, value] of Object.entries(env || {})) {
+    if (typeof value === "string") {
+      process.env[key] = value;
+    }
+  }
+}
+
 export default {
-  fetch: handler.fetch,
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    hydrateProcessEnv(env);
+    return handler.fetch(request, env, ctx);
+  },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    hydrateProcessEnv(env);
+
     const request = new Request("https://pts-ads-monitor.internal/api/monitor", {
       method: "GET",
       headers: {
