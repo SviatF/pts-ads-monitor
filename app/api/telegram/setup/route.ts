@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { telegramWebhookSecret } from "@/lib/telegram-webhook-secret";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,8 @@ function authorized(request: NextRequest) {
 
 async function configureWebhook(request: NextRequest) {
   const webhookUrl = `${request.nextUrl.origin}/api/telegram`;
-  const secretToken = process.env.TELEGRAM_WEBHOOK_SECRET || runnerSecret();
+  const secretToken = telegramWebhookSecret();
+  if (!secretToken) throw new Error("TELEGRAM_WEBHOOK_SECRET or INVOICE_RUNNER_SECRET is not configured");
 
   const setResponse = await fetch(`https://api.telegram.org/bot${telegramToken()}/setWebhook`, {
     method: "POST",
