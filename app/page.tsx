@@ -101,18 +101,26 @@ export default async function Dashboard() {
               {accounts.map((account) => {
                 const cls = statusClass(account.status_kind);
                 const reporting = reportingByAccount.get(account.meta_account_id);
+                const reportingHref = `/reporting/${encodeURIComponent(account.meta_account_id)}`;
                 return <tr key={account.meta_account_id}>
-                  <td><strong>{account.name}</strong></td>
+                  <td>
+                    <Link href={reportingHref} style={{ color: "inherit", textDecoration: "none" }}>
+                      <strong>{account.name}</strong>
+                    </Link>
+                  </td>
                   <td><code>{account.meta_account_id}</code></td>
                   <td className={cls}><span className={`dot ${cls}`} />{account.status_label}</td>
                   <td>
                     {reporting ? (
                       <div className="reportingCell">
                         <span className="ok">Configured · {reporting.goal_label}</span>
-                        <a href={reporting.report_url} target="_blank" rel="noreferrer">Open Sheet ↗</a>
+                        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                          <Link className="inlineSetup" href={reportingHref}>Керувати / Sync</Link>
+                          <a href={reporting.report_url} target="_blank" rel="noreferrer">Open Sheet ↗</a>
+                        </div>
                       </div>
                     ) : (
-                      <Link className="inlineSetup" href={`/reporting/${encodeURIComponent(account.meta_account_id)}`}>Налаштувати</Link>
+                      <Link className="inlineSetup" href={reportingHref}>Налаштувати</Link>
                     )}
                   </td>
                   <td>{new Date(account.last_checked_at).toLocaleString("uk-UA")}</td>
