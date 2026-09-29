@@ -1,4 +1,4 @@
-import { ensureProjectReportLifecycle, createProjectReport as createWithServiceAccount, REPORTING_GOALS } from "@/lib/google-reporting";
+import { ensureProjectReportLifecycle, createProjectReport as createWithServiceAccount, REPORTING_GOALS } from "./google-reporting";
 import { getGoogleUserAccessToken, hasGoogleUserOAuth } from "@/lib/google-oauth";
 
 export { REPORTING_GOALS };
@@ -64,8 +64,6 @@ export async function createProjectReport(input: {
     },
   );
 
-  // The spreadsheet is owned by the connected Google user. The existing service account
-  // can continue managing sheets because the destination folder is shared with it.
   await ensureProjectReportLifecycle({
     spreadsheetId: copied.id,
     projectName: input.projectName,
