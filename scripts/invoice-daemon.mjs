@@ -21,7 +21,7 @@ function sleep(ms) {
 
 async function runOnce() {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, ['scripts/invoice-runner.mjs'], {
+    const child = spawn(process.execPath, ['scripts/invoice-runner-supervisor.mjs'], {
       stdio: 'inherit',
       env: { ...process.env, META_STORAGE_STATE: storagePath },
     });
