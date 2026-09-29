@@ -1,47 +1,134 @@
 import { chromium } from 'playwright';
+import { readFile } from 'node:fs/promises';
+import crypto from 'node:crypto';
 
 const APP_BASE_URL = process.env.INVOICE_APP_BASE_URL;
 const RUNNER_SECRET = process.env.INVOICE_RUNNER_SECRET;
 const META_STORAGE_STATE = process.env.META_STORAGE_STATE || 'meta-storage-state.json';
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!APP_BASE_URL || !RUNNER_SECRET) {
-  throw new Error('INVOICE_APP_BASE_URL and INVOICE_RUNNER_SECRET are required');
+if (!APP_BASE_URL || !RUNNER_SECRET || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error('INVOICE_APP_BASE_URL, INVOICE_RUNNER_SECRET, SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
 }
 
-async function api(path, init = {}) {
+async function appApi(path) {
   const response = await fetch(`${APP_BASE_URL.replace(/\/$/, '')}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${RUNNER_SECRET}`,
-      ...(init.headers || {}),
-    },
+    headers: { Authorization: `Bearer ${RUNNER_SECRET}` },
   });
   if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`);
   return response.json();
 }
 
+async function listSubscriptions() {
+  const url = new URL('/rest/v1/invoice_subscriptions', SUPABASE_URL);
+  url.searchParams.set('select', 'telegram_chat_id,meta_account_id,account_name,currency,start_date,enabled');
+  url.searchParams.set('enabled', 'eq.true');
+  url.searchParams.set('order', 'start_date.asc');
+
+  const response = await fetch(url, {
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+  });
+  if (!response.ok) throw new Error(`Supabase subscriptions failed: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
+function groupSubscriptions(rows) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const accountId = String(row.meta_account_id).replace(/^act_/, '');
+    const current = grouped.get(accountId) || {
+      accountId,
+      accountName: row.account_name,
+      currency: row.currency || null,
+      earliestStartDate: row.start_date,
+      subscriptions: [],
+    };
+    if (row.start_date < current.earliestStartDate) current.earliestStartDate = row.start_date;
+    current.subscriptions.push(row);
+    grouped.set(accountId, current);
+  }
+  return [...grouped.values()];
+}
+
 function parseMoney(text = '') {
   const cleaned = text.replace(/\s+/g, ' ').trim();
-  const match = cleaned.match(/(?:USD|EUR|UAH|PLN|GBP|\$|€|£)?\s?([\d.,]+(?:[.,]\d{2})?)/);
-  return match?.[1] || null;
+  const match = cleaned.match(/(?:USD|EUR|UAH|PLN|GBP|\$|€|£)\s*([\d.,]+(?:[.,]\d{2})?)/i)
+    || cleaned.match(/([\d.,]+(?:[.,]\d{2})?)\s*(?:USD|EUR|UAH|PLN|GBP)/i);
+  if (!match) return null;
+  const normalized = match[1].replace(/,(?=\d{3}(?:\D|$))/g, '').replace(',', '.');
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+}
+
+function parseCurrency(text = '', fallback = null) {
+  if (/\bUSD\b|\$/i.test(text)) return 'USD';
+  if (/\bEUR\b|€/i.test(text)) return 'EUR';
+  if (/\bUAH\b|₴/i.test(text)) return 'UAH';
+  if (/\bPLN\b/i.test(text)) return 'PLN';
+  if (/\bGBP\b|£/i.test(text)) return 'GBP';
+  return fallback;
+}
+
+function normalizeDate(year, month, day) {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function parseInvoiceDate(text = '') {
+  const iso = text.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  if (iso) return normalizeDate(iso[1], iso[2], iso[3]);
+
+  const dmy = text.match(/\b(\d{1,2})[./-](\d{1,2})[./-](20\d{2})\b/);
+  if (dmy) return normalizeDate(dmy[3], dmy[2], dmy[1]);
+
+  const monthNames = {
+    jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
+    apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
+    aug: 8, august: 8, sep: 9, sept: 9, september: 9, oct: 10, october: 10,
+    nov: 11, november: 11, dec: 12, december: 12,
+  };
+  const named = text.match(/\b(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(20\d{2})\b/i)
+    || text.match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(20\d{2})\b/i);
+  if (named) {
+    const monthFirst = /^[A-Za-z]/.test(named[1]);
+    const monthToken = (monthFirst ? named[1] : named[2]).toLowerCase();
+    const day = monthFirst ? named[2] : named[1];
+    const year = named[3];
+    return normalizeDate(year, monthNames[monthToken], day);
+  }
+  return null;
 }
 
 function extractInvoiceKey(text = '', href = '') {
-  const invoiceMatch = text.match(/(?:invoice|receipt|document)\s*(?:no\.?|#|id)?\s*[:#-]?\s*([A-Z0-9-]{5,})/i);
-  if (invoiceMatch) return invoiceMatch[1];
-  const urlMatch = href.match(/(?:invoice|receipt|document)[^A-Z0-9]*([A-Z0-9-]{5,})/i);
-  if (urlMatch) return urlMatch[1];
-  return Buffer.from(`${text}|${href}`).toString('base64url').slice(0, 48);
+  const match = text.match(/(?:invoice|receipt|document)\s*(?:no\.?|number|#|id)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{4,})/i)
+    || href.match(/(?:invoice|receipt|document)[^A-Z0-9]*([A-Z0-9][A-Z0-9-]{4,})/i);
+  if (match) return match[1];
+  return crypto.createHash('sha256').update(`${text}|${href}`).digest('hex').slice(0, 32);
 }
 
-async function discoverInvoiceDownloads(page, accountId, startDate) {
-  const billingUrl = `https://business.facebook.com/billing_hub/payment_activity?asset_id=${encodeURIComponent(accountId)}`;
-  await page.goto(billingUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
-  await page.waitForTimeout(5000);
-
-  if (/login|checkpoint/i.test(page.url())) {
-    throw new Error('META_SESSION_EXPIRED');
+async function candidateContext(locator) {
+  const row = locator.locator('xpath=ancestor-or-self::*[self::tr or @role="row"][1]');
+  if (await row.count().catch(() => 0)) {
+    const text = await row.first().innerText().catch(() => '');
+    if (text) return text;
   }
+  const parent = locator.locator('xpath=ancestor::*[self::div or self::li][1]');
+  return (await parent.first().innerText().catch(() => '')) || (await locator.innerText().catch(() => '')) || '';
+}
+
+async function discoverInvoiceDownloads(page, account) {
+  const billingUrl = `https://business.facebook.com/billing_hub/payment_activity?asset_id=${encodeURIComponent(account.accountId)}`;
+  await page.goto(billingUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+  await page.waitForTimeout(6000);
+
+  if (/login|checkpoint|two_factor/i.test(page.url())) throw new Error('META_SESSION_EXPIRED');
 
   const selectors = [
     'a:has-text("Download")',
@@ -54,48 +141,51 @@ async function discoverInvoiceDownloads(page, accountId, startDate) {
 
   const seen = new Set();
   const candidates = [];
-
   for (const selector of selectors) {
     const items = page.locator(selector);
     const count = await items.count().catch(() => 0);
-    for (let i = 0; i < Math.min(count, 100); i += 1) {
+    for (let i = 0; i < Math.min(count, 150); i += 1) {
       const item = items.nth(i);
-      const text = (await item.innerText().catch(() => '')) || '';
       const href = (await item.getAttribute('href').catch(() => null)) || '';
-      const key = extractInvoiceKey(text, href);
+      const contextText = await candidateContext(item);
+      const invoiceDate = parseInvoiceDate(contextText);
+      if (!invoiceDate || invoiceDate < account.earliestStartDate) continue;
+      const key = extractInvoiceKey(contextText, href);
       if (seen.has(key)) continue;
       seen.add(key);
-      candidates.push({ item, text, href, key });
+      candidates.push({ item, href, key, contextText, invoiceDate });
     }
   }
-
-  return { billingUrl, startDate, candidates };
+  return candidates;
 }
 
 async function downloadCandidate(page, candidate) {
-  const downloadPromise = page.waitForEvent('download', { timeout: 20000 }).catch(() => null);
+  const downloadPromise = page.waitForEvent('download', { timeout: 25000 }).catch(() => null);
   await candidate.item.click({ timeout: 15000 }).catch(async () => {
-    if (candidate.href) await page.goto(candidate.href, { waitUntil: 'domcontentloaded' });
+    if (candidate.href) await page.goto(candidate.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
   });
   const download = await downloadPromise;
   if (!download) return null;
-  const buffer = await require('node:fs/promises').then(async fs => {
-    const path = await download.path();
-    return path ? fs.readFile(path) : null;
-  });
-  if (!buffer) return null;
-  const suggested = download.suggestedFilename() || `${candidate.key}.pdf`;
-  return { buffer, filename: suggested };
+  const filePath = await download.path();
+  if (!filePath) return null;
+  const buffer = await readFile(filePath);
+  if (!buffer.subarray(0, 4).equals(Buffer.from('%PDF'))) return null;
+  return {
+    buffer,
+    filename: download.suggestedFilename() || `Meta_Invoice_${candidate.key}.pdf`,
+  };
 }
 
-async function sendPdf(subscription, candidate, file) {
+async function sendPdf(account, candidate, file) {
   const form = new FormData();
-  form.set('chat_id', String(subscription.chat_id));
-  form.set('ad_account_id', subscription.meta_account_id);
+  form.set('meta_account_id', account.accountId);
   form.set('invoice_key', candidate.key);
-  form.set('invoice_date', new Date().toISOString().slice(0, 10));
-  const amount = parseMoney(candidate.text);
-  if (amount) form.set('amount', amount);
+  form.set('invoice_date', candidate.invoiceDate);
+  const amount = parseMoney(candidate.contextText);
+  if (amount != null) form.set('amount', String(amount));
+  const currency = parseCurrency(candidate.contextText, account.currency);
+  if (currency) form.set('currency', currency);
+  if (candidate.href) form.set('source_url', candidate.href);
   form.set('pdf', new Blob([file.buffer], { type: 'application/pdf' }), file.filename);
 
   const response = await fetch(`${APP_BASE_URL.replace(/\/$/, '')}/api/invoices/ingest`, {
@@ -107,39 +197,57 @@ async function sendPdf(subscription, candidate, file) {
   return response.json();
 }
 
+async function alreadyDelivered(account, candidate) {
+  for (const subscription of account.subscriptions) {
+    const result = await appApi(`/api/invoices/check?chat_id=${encodeURIComponent(subscription.telegram_chat_id)}&ad_account_id=${encodeURIComponent(account.accountId)}&invoice_key=${encodeURIComponent(candidate.key)}`);
+    if (!result.delivered && candidate.invoiceDate >= subscription.start_date) return false;
+  }
+  return true;
+}
+
 async function main() {
-  const payload = await api('/api/invoices/subscriptions');
-  const subscriptions = payload.subscriptions || [];
-  if (!subscriptions.length) {
+  const subscriptions = await listSubscriptions();
+  const accounts = groupSubscriptions(subscriptions);
+  if (!accounts.length) {
     console.log('No active invoice subscriptions');
     return;
   }
 
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ storageState: META_STORAGE_STATE });
+  const context = await browser.newContext({ storageState: META_STORAGE_STATE, acceptDownloads: true });
   const page = await context.newPage();
 
+  let sessionExpired = false;
   try {
-    for (const subscription of subscriptions) {
-      console.log(`Checking ${subscription.meta_account_id} for chat ${subscription.chat_id}`);
+    for (const account of accounts) {
+      console.log(`Checking ${account.accountId} (${account.accountName})`);
       try {
-        const { candidates } = await discoverInvoiceDownloads(page, subscription.meta_account_id, subscription.start_date);
+        const candidates = await discoverInvoiceDownloads(page, account);
         for (const candidate of candidates) {
-          const duplicate = await api(`/api/invoices/check?chat_id=${encodeURIComponent(subscription.chat_id)}&ad_account_id=${encodeURIComponent(subscription.meta_account_id)}&invoice_key=${encodeURIComponent(candidate.key)}`);
-          if (duplicate.delivered) continue;
+          if (await alreadyDelivered(account, candidate)) continue;
           const file = await downloadCandidate(page, candidate);
-          if (!file) continue;
-          await sendPdf(subscription, candidate, file);
-          console.log(`Delivered ${candidate.key}`);
+          if (!file) {
+            console.warn(`No PDF download for ${candidate.key}`);
+            continue;
+          }
+          const result = await sendPdf(account, candidate, file);
+          console.log(`Invoice ${candidate.key}: delivered=${result.delivered?.length || 0}, skipped=${result.skipped?.length || 0}`);
         }
       } catch (error) {
-        console.error(`Account ${subscription.meta_account_id}:`, error instanceof Error ? error.message : error);
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Account ${account.accountId}: ${message}`);
+        if (message === 'META_SESSION_EXPIRED') {
+          sessionExpired = true;
+          break;
+        }
       }
     }
   } finally {
     await context.close();
     await browser.close();
   }
+
+  if (sessionExpired) process.exitCode = 2;
 }
 
 main().catch((error) => {
