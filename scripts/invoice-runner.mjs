@@ -7,7 +7,7 @@ const RUNNER_SECRET = process.env.INVOICE_RUNNER_SECRET;
 const META_STORAGE_STATE = process.env.META_STORAGE_STATE || 'meta-storage-state.json';
 const META_USER_DATA_DIR = process.env.META_USER_DATA_DIR || '';
 const META_HEADLESS = process.env.META_HEADLESS === '1';
-const MAX_BROWSER_RECOVERIES = Number(process.env.INVOICE_BROWSER_RECOVERIES || 3);
+const MAX_BROWSER_RECOVERIES = Number(process.env.INVOICE_BROWSER_RECOVERIES || 1);
 
 if (!APP_BASE_URL || !RUNNER_SECRET) {
   throw new Error('INVOICE_APP_BASE_URL and INVOICE_RUNNER_SECRET are required');
@@ -93,10 +93,25 @@ function unixRange(startIso, endIso) {
 function billingUrl(accountId, startDate, endDate) {
   const query = new URLSearchParams({
     asset_id: accountId,
-    placement: 'standalone',
+    payment_account_id: accountId,
+    placement: 'BILLING',
     date: unixRange(startDate, endDate),
   });
-  return `https://business.facebook.com/billing_hub/payment_activity?${query.toString()}`;
+  return `https://adsmanager.facebook.com/adsmanager/billing_hub/payment_activity/?${query.toString()}`;
+}
+
+async function visibleBillingRange(page) {
+  const pattern = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+20\d{2}\s*[–—-]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+20\d{2}\b/i;
+  const controls = page.locator('button, [role="button"]');
+  const count = await controls.count().catch(() => 0);
+  for (let i = 0; i < Math.min(count, 500); i += 1) {
+    const control = controls.nth(i);
+    if (!(await control.isVisible().catch(() => false))) continue;
+    const text = (await control.innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+    const match = text.match(pattern);
+    if (match) return match[0];
+  }
+  return null;
 }
 
 async function loadAllTransactionRows(page) {
@@ -146,6 +161,10 @@ async function openBilling(page, account) {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
   await page.waitForTimeout(7000);
   if (/login|checkpoint|two_factor|security\/block/i.test(page.url())) throw new Error('META_SESSION_EXPIRED');
+  console.log(`Meta Billing URL: ${page.url()}`);
+  const actualRange = await visibleBillingRange(page);
+  if (actualRange) console.log(`Meta UI range: ${actualRange}`);
+  else console.warn('Meta UI range: could not detect visible range');
   await loadAllTransactionRows(page);
 }
 
@@ -204,20 +223,54 @@ async function readPdfResponse(response, candidate) {
   return { buffer, filename: `Meta_Invoice_${candidate.key}.pdf` };
 }
 
-async function findInvoiceButton(page, key) {
+async function describeRowControls(row) {
+  const controls = row.locator('button, a, [role="button"]');
+  const count = await controls.count().catch(() => 0);
+  const descriptions = [];
+  for (let i = 0; i < Math.min(count, 12); i += 1) {
+    const item = controls.nth(i);
+    const tag = await item.evaluate((el) => el.tagName.toLowerCase()).catch(() => '?');
+    const aria = (await item.getAttribute('aria-label').catch(() => null)) || '';
+    const title = (await item.getAttribute('title').catch(() => null)) || '';
+    const href = (await item.getAttribute('href').catch(() => null)) || '';
+    const text = (await item.innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+    descriptions.push(`#${i + 1} ${tag} aria="${aria}" title="${title}" text="${text}" href="${href}"`);
+  }
+  return descriptions;
+}
+
+async function findInvoiceButton(page, key, { logDiagnostics = true } = {}) {
   const row = page.locator('tr, [role="row"]').filter({ hasText: key }).first();
   if (!(await row.count().catch(() => 0))) return null;
 
-  for (const selector of [
+  const safeSelectors = [
     '[aria-label*="download" i]',
+    '[aria-label*="invoice" i]',
+    '[aria-label*="receipt" i]',
     '[title*="download" i]',
+    '[title*="invoice" i]',
+    '[title*="receipt" i]',
     'a[download]',
-    'button',
-  ]) {
-    const items = row.locator(selector);
-    const count = await items.count().catch(() => 0);
-    if (!count) continue;
-    return selector === 'button' ? items.last() : items.first();
+    'a[href*="invoice" i]',
+    'a[href*="receipt" i]',
+    'a[href*="pdf" i]',
+  ];
+
+  for (const selector of safeSelectors) {
+    const item = row.locator(selector).first();
+    if (await item.isVisible().catch(() => false)) return item;
+  }
+
+  const buttons = row.locator('button:visible, [role="button"]:visible');
+  const buttonCount = await buttons.count().catch(() => 0);
+  if (buttonCount === 1) {
+    const only = buttons.first();
+    if (await only.isEnabled().catch(() => false)) return only;
+  }
+
+  if (logDiagnostics) {
+    const details = await describeRowControls(row);
+    console.warn(`No unambiguous invoice action for ${key}. Row controls: ${details.join(' | ') || 'none'}`);
   }
   return null;
 }
@@ -321,6 +374,13 @@ async function createBrowserSession(account) {
   return { context, page };
 }
 
+async function recoverSession(account, session, reason) {
+  console.warn(`Recovering browser: ${reason}`);
+  await closeContext(session?.context);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  return createBrowserSession(account);
+}
+
 async function processAccount(account) {
   let session = await createBrowserSession(account);
   let candidates;
@@ -334,28 +394,36 @@ async function processAccount(account) {
   for (const candidate of candidates) {
     if (await alreadyDelivered(account, candidate)) continue;
 
-    let delivered = false;
-    for (let attempt = 0; attempt <= MAX_BROWSER_RECOVERIES && !delivered; attempt += 1) {
+    let completed = false;
+    for (let attempt = 0; attempt <= MAX_BROWSER_RECOVERIES && !completed; attempt += 1) {
       try {
         if (session.page.isClosed()) throw new Error('BROWSER_CLOSED');
         const file = await downloadCandidate(session.context, session.page, candidate);
         if (!file) {
-          console.warn(`No PDF download for ${candidate.key}`);
+          console.warn(`No PDF download for ${candidate.key}; skipping without crashing the scan`);
+          completed = true;
           break;
         }
         const result = await sendPdf(account, candidate, file);
         console.log(`Invoice ${candidate.key}: delivered=${result.delivered?.length || 0}, skipped=${result.skipped?.length || 0}`);
-        delivered = true;
+        completed = true;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`Invoice ${candidate.key}: ${message}`);
         const browserClosed = /BROWSER_CLOSED|Target page, context or browser has been closed/i.test(message) || session.page.isClosed();
-        if (!browserClosed || attempt >= MAX_BROWSER_RECOVERIES) break;
+        if (!browserClosed) {
+          completed = true;
+          break;
+        }
 
-        console.warn(`Recovering browser after crash (${attempt + 1}/${MAX_BROWSER_RECOVERIES})...`);
-        await closeContext(session.context);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        session = await createBrowserSession(account);
+        if (attempt < MAX_BROWSER_RECOVERIES) {
+          session = await recoverSession(account, session, `crash on ${candidate.key} (${attempt + 1}/${MAX_BROWSER_RECOVERIES})`);
+          continue;
+        }
+
+        console.warn(`Skipping crash-prone invoice ${candidate.key} after ${attempt + 1} attempt(s); continuing with remaining invoices`);
+        session = await recoverSession(account, session, `continue after skipping ${candidate.key}`);
+        completed = true;
       }
     }
   }
