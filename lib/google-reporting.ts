@@ -1,3 +1,5 @@
+import { PTS_REPORT_TEMPLATE } from "@/lib/report-template";
+
 type GoalPreset = {
   key: string;
   label: string;
@@ -88,7 +90,7 @@ async function accessToken() {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      grant_type: "urn:ietf:params:oauth-type:jwt-bearer".replace("oauth-type", "oauth-grant-type"),
       assertion,
     }),
   });
@@ -150,6 +152,7 @@ export async function createProjectReport(input: {
   const goalFocus = preset.key === "other" && customGoal ? customGoal.toLowerCase() : preset.focusLabel;
   const fileName = `${input.projectName} × PTS | PERFORMANCE REPORT`;
 
+  // Always copy the immutable master. This is what guarantees exact 1:1 styling.
   const copied = await googleJson<{ id: string; name: string; webViewLink?: string }>(
     `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cfg.templateFileId)}/copy?supportsAllDrives=true&fields=id,name,webViewLink`,
     {
@@ -170,28 +173,41 @@ export async function createProjectReport(input: {
 
   const start = parseIsoDate(input.startDate);
   const end = addDays(start, 6);
-  const headerRows = [6, 30, 51, 71, 91, 111, 131, 151];
-  const dateRows = [29, 50, 70, 90, 110, 130, 150];
+  const headerRows = [
+    PTS_REPORT_TEMPLATE.weekly.headerRow,
+    ...PTS_REPORT_TEMPLATE.daily.blocks.map((block) => block.headerRow),
+  ];
 
   const data: Array<{ range: string; values: string[][] }> = [
-    { range: `${sheet}!A1`, values: [[fileName]] },
-    { range: `${sheet}!B2`, values: [[formatUaDate(start)]] },
-    { range: `${sheet}!D2`, values: [[formatUaDate(end)]] },
+    { range: `${sheet}!${PTS_REPORT_TEMPLATE.titleCell}`, values: [[fileName]] },
+    { range: `${sheet}!${PTS_REPORT_TEMPLATE.periodStartCell}`, values: [[formatUaDate(start)]] },
+    { range: `${sheet}!${PTS_REPORT_TEMPLATE.periodEndCell}`, values: [[formatUaDate(end)]] },
     {
-      range: `${sheet}!F2`,
+      range: `${sheet}!${PTS_REPORT_TEMPLATE.focusCell}`,
       values: [[`Фокус: Цільовий лід → A-лід → проведена зустріч → ${goalFocus}`]],
     },
   ];
 
   for (const row of headerRows) {
-    data.push({ range: `${sheet}!O${row}`, values: [[goalColumn]] });
-    data.push({ range: `${sheet}!P${row}`, values: [[`Конверсія\nЗ → ${goalFocus}`]] });
+    data.push({
+      range: `${sheet}!${PTS_REPORT_TEMPLATE.dynamicColumns.finalGoal}${row}`,
+      values: [[goalColumn]],
+    });
+    data.push({
+      range: `${sheet}!${PTS_REPORT_TEMPLATE.dynamicColumns.finalGoalConversion}${row}`,
+      values: [[`Конверсія\nЗ → ${goalFocus}`]],
+    });
   }
 
-  dateRows.forEach((row, index) => {
-    data.push({ range: `${sheet}!A${row}`, values: [[formatUaDate(addDays(start, index))]] });
+  PTS_REPORT_TEMPLATE.daily.blocks.forEach((block, index) => {
+    data.push({
+      range: `${sheet}!A${block.dateRow}`,
+      values: [[formatUaDate(addDays(start, index))]],
+    });
   });
 
+  // values:batchUpdate changes values only. No formatting API calls are allowed here,
+  // so master styles/colors/merged cells/widths/heights remain untouched in every copy.
   await googleJson(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(copied.id)}/values:batchUpdate`,
     {
