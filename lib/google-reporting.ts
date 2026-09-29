@@ -249,21 +249,40 @@ async function clearRanges(spreadsheetId: string, ranges: string[]) {
 
 async function ensureMasterSheet(spreadsheetId: string) {
   const sheets = await getSheets(spreadsheetId);
-  let master = sheets.find((sheet) => sheet.properties.title === MASTER_SHEET_TITLE);
+  const master = sheets.find((sheet) => sheet.properties.title === MASTER_SHEET_TITLE);
   if (master) return master.properties.sheetId;
 
   const source = sheets[0];
   if (!source) throw new Error("Project report has no worksheet");
 
+  // Google does not allow hiding the only visible sheet. Rename first, create the
+  // first weekly sheet, and hide the master afterwards.
   await batchUpdateSpreadsheet(spreadsheetId, [
     {
       updateSheetProperties: {
-        properties: { sheetId: source.properties.sheetId, title: MASTER_SHEET_TITLE, hidden: true },
-        fields: "title,hidden",
+        properties: { sheetId: source.properties.sheetId, title: MASTER_SHEET_TITLE },
+        fields: "title",
       },
     },
   ]);
   return source.properties.sheetId;
+}
+
+async function hideMasterSheet(spreadsheetId: string, masterSheetId: number) {
+  const sheets = await getSheets(spreadsheetId);
+  const master = sheets.find((sheet) => sheet.properties.sheetId === masterSheetId);
+  const visibleOthers = sheets.some(
+    (sheet) => sheet.properties.sheetId !== masterSheetId && !sheet.properties.hidden,
+  );
+  if (!master || master.properties.hidden || !visibleOthers) return;
+  await batchUpdateSpreadsheet(spreadsheetId, [
+    {
+      updateSheetProperties: {
+        properties: { sheetId: masterSheetId, hidden: true },
+        fields: "hidden",
+      },
+    },
+  ]);
 }
 
 async function duplicateFromMaster(spreadsheetId: string, masterSheetId: number, title: string) {
@@ -477,6 +496,7 @@ export async function ensureProjectReportLifecycle(input: {
     month = addMonths(month, 1);
   }
 
+  await hideMasterSheet(input.spreadsheetId, masterSheetId);
   sheets = await getSheets(input.spreadsheetId);
   const visibleSheets = sheets.filter((sheet) => !sheet.properties.hidden).length;
   return { created, visibleSheets };
