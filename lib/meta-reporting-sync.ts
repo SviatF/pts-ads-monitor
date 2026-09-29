@@ -30,17 +30,38 @@ const CHANNEL_ROW_OFFSET: Record<Channel, number> = {
   site: 4,
 };
 
-const RESULT_ACTION_PRIORITY = [
-  "lead",
-  "onsite_conversion.lead_grouped",
-  "offsite_conversion.fb_pixel_lead",
-  "onsite_conversion.messaging_conversation_started_7d",
-  "messaging_conversation_started_7d",
-  "onsite_conversion.messaging_first_reply",
-  "contact",
-  "offsite_conversion.fb_pixel_contact",
-  "onsite_conversion.contact_website",
-];
+// Meta Ads Manager's Results column is not one universal "lead" metric.
+// Choose the action type that corresponds to the landing/channel first,
+// then fall back to broader lead/contact actions only if needed.
+const RESULT_ACTION_PRIORITY: Record<Channel, string[]> = {
+  direct: [
+    "onsite_conversion.messaging_conversation_started_7d",
+    "messaging_conversation_started_7d",
+    "onsite_conversion.messaging_first_reply",
+    "lead",
+    "contact",
+  ],
+  leadform: [
+    "onsite_conversion.lead_grouped",
+    "lead",
+    "offsite_conversion.fb_pixel_lead",
+    "contact",
+  ],
+  quiz: [
+    "offsite_conversion.fb_pixel_lead",
+    "lead",
+    "onsite_conversion.contact_website",
+    "offsite_conversion.fb_pixel_contact",
+    "contact",
+  ],
+  site: [
+    "offsite_conversion.fb_pixel_lead",
+    "lead",
+    "onsite_conversion.contact_website",
+    "offsite_conversion.fb_pixel_contact",
+    "contact",
+  ],
+};
 
 function metaToken() {
   const value = process.env.META_ACCESS_TOKEN;
@@ -67,12 +88,14 @@ export function mapCampaignToChannel(name: string): Channel | null {
   return null;
 }
 
-function resultCount(actions: MetaAction[] | undefined) {
+function resultCount(channel: Channel, actions: MetaAction[] | undefined) {
   const byType = new Map((actions || []).map((item) => [item.action_type || "", Number(item.value || 0)]));
-  for (const actionType of RESULT_ACTION_PRIORITY) {
-    if (byType.has(actionType)) return Number(byType.get(actionType) || 0);
+  for (const actionType of RESULT_ACTION_PRIORITY[channel]) {
+    if (byType.has(actionType)) {
+      return { value: Number(byType.get(actionType) || 0), actionType };
+    }
   }
-  return 0;
+  return { value: 0, actionType: null as string | null };
 }
 
 async function metaGraphAll<T>(path: string, params: Record<string, string>) {
@@ -159,6 +182,7 @@ export async function syncMetaReporting(input: {
   const aggregate = new Map<string, { leads: number; spend: number }>();
   const unmapped = new Set<string>();
   const mappedCampaigns = new Set<string>();
+  const resultActionTypes = new Map<string, number>();
   let mappedSpend = 0;
   let mappedLeads = 0;
 
@@ -170,8 +194,12 @@ export async function syncMetaReporting(input: {
       continue;
     }
 
-    const leads = resultCount(insight.actions);
+    const result = resultCount(channel, insight.actions);
+    const leads = result.value;
     const spend = Number(insight.spend || 0);
+    if (result.actionType) {
+      resultActionTypes.set(result.actionType, (resultActionTypes.get(result.actionType) || 0) + 1);
+    }
     mappedCampaigns.add(name);
     mappedSpend += spend;
     mappedLeads += leads;
@@ -209,6 +237,7 @@ export async function syncMetaReporting(input: {
     insightRows: insights.length,
     mappedCampaigns: [...mappedCampaigns],
     unmappedCampaigns: [...unmapped],
+    resultActionTypes: [...resultActionTypes.entries()].map(([actionType, rows]) => ({ actionType, rows })),
     mappedSpend: Number(mappedSpend.toFixed(2)),
     mappedLeads,
     cellsWritten: data.length,
