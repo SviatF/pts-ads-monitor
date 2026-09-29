@@ -1,0 +1,1 @@
+Invoice runner foundation added. Browser execution environment and persisted Meta session must be configured before enabling scheduled collection.
