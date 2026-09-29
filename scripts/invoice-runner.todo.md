@@ -1,0 +1,1 @@
+Remaining integration: add a browser-capable scheduled environment, provide a persisted Meta session, and configure the app URL/shared runner key.
