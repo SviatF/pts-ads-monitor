@@ -1,0 +1,1 @@
+Runner behavior: process active subscriptions only; skip previously delivered invoices; treat Meta login/checkpoint pages as session-expired; do not store Meta credentials in the repository.
