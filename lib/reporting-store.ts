@@ -1,3 +1,5 @@
+import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+
 export type ReportingConfig = {
   meta_account_id: string;
   project_name: string;
@@ -58,11 +60,26 @@ export async function getReportingConfig(metaAccountId: string): Promise<Reporti
 export async function upsertReportingConfig(
   row: Omit<ReportingConfig, "created_at" | "updated_at">,
 ): Promise<ReportingConfig> {
+  const existing = await getReportingConfig(row.meta_account_id);
   const now = new Date().toISOString();
   const rows = await request<ReportingConfig[]>("reporting_configs?on_conflict=meta_account_id", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({ ...row, updated_at: now }),
   });
-  return rows[0];
+  const saved = rows[0];
+
+  const adminChatId = process.env.TELEGRAM_CHAT_ID;
+  if (adminChatId && saved && (!existing || existing.report_file_id !== saved.report_file_id)) {
+    try {
+      await sendTelegramToChat(
+        adminChatId,
+        `📊 <b>PTS Reporting</b>\n\n✅ Створено та підключено звіт\nПроєкт: <b>${escapeTelegramHtml(saved.project_name)}</b>\nКабінет: <code>${escapeTelegramHtml(saved.meta_account_id)}</code>\nЦіль: <b>${escapeTelegramHtml(saved.goal_label)}</b>\n\n<a href="${escapeTelegramHtml(saved.report_url)}">Відкрити Google Sheet</a>`,
+      );
+    } catch (error) {
+      console.error("Could not notify main Telegram chat about report creation", error);
+    }
+  }
+
+  return saved;
 }
