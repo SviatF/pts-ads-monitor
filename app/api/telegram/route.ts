@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBusinessAccounts, getBusinessInvoices } from "@/lib/meta";
+import { getAdAccountBillingDiagnostics, getBusinessAccounts, getBusinessInvoices } from "@/lib/meta";
 import {
   clearInvoiceSetupSession,
   disableInvoiceSubscriptions,
@@ -35,6 +35,12 @@ function isoDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function commandArgument(text: string, command: string) {
+  const pattern = new RegExp(`^/${command}(?:@\\w+)?(?:\\s+(.+))?$`, "i");
+  const match = pattern.exec(text);
+  return match ? (match[1] || "").trim() : null;
+}
+
 export async function POST(request: NextRequest) {
   if (!webhookAuthorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -43,6 +49,43 @@ export async function POST(request: NextRequest) {
   const chatId = message?.chat?.id != null ? String(message.chat.id) : null;
   const text = typeof message?.text === "string" ? message.text.trim() : "";
   if (!chatId || !text) return NextResponse.json({ ok: true });
+
+  const paymentTestArg = commandArgument(text, "payment_api_test");
+  if (paymentTestArg !== null) {
+    const accountId = normalizeAccountId(paymentTestArg.replace(/[<>]/g, ""));
+    if (!/^\d{5,25}$/.test(accountId)) {
+      await sendTelegramToChat(chatId, "❌ Формат: <code>/payment_api_test 123456789012345</code>");
+      return NextResponse.json({ ok: true });
+    }
+
+    try {
+      const result = await getAdAccountBillingDiagnostics(accountId);
+      const account = result.account as Record<string, unknown>;
+      const probeRows = result.probes.map((probe) => {
+        if (probe.result.ok) {
+          const data = Array.isArray((probe.result.body as { data?: unknown[] })?.data)
+            ? (probe.result.body as { data?: unknown[] }).data || []
+            : [];
+          return `• <code>/${escapeTelegramHtml(probe.edge)}</code>: ✅ endpoint відповів, rows=<b>${data.length}</b>`;
+        }
+        return `• <code>/${escapeTelegramHtml(probe.edge)}</code>: ❌ ${escapeTelegramHtml(probe.result.error)}${probe.result.code != null ? ` (code ${probe.result.code})` : ""}`;
+      }).join("\n");
+
+      const hasUsablePaymentEdge = result.probes.some((probe) => probe.result.ok);
+      const verdict = hasUsablePaymentEdge
+        ? "🟡 Один із billing edge відповів. Далі дивимось, чи є там receipt/PDF fields."
+        : "⚠️ Для цього ad account публічний Marketing API не віддав payment/receipt edge. Для звичайних card/threshold charges PDF, найімовірніше, доведеться брати через Billing UI.";
+
+      await sendTelegramToChat(
+        chatId,
+        `🧪 <b>META PAYMENT API TEST</b>\n\nAccount: <b>${escapeTelegramHtml(String(account.name || "—"))}</b>\nID: <code>${escapeTelegramHtml(String(account.id || `act_${accountId}`))}</code>\nGraph: <code>${escapeTelegramHtml(result.graphVersion)}</code>\nCurrency: <b>${escapeTelegramHtml(String(account.currency || "—"))}</b>\nBalance: <b>${escapeTelegramHtml(String(account.balance ?? "—"))}</b>\nAmount spent: <b>${escapeTelegramHtml(String(account.amount_spent ?? "—"))}</b>\n\n<b>Billing edge probes:</b>\n${probeRows}\n\n${verdict}`
+      );
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      await sendTelegramToChat(chatId, `❌ <b>META PAYMENT API TEST FAILED</b>\n\n<code>${escapeTelegramHtml(messageText)}</code>`);
+    }
+    return NextResponse.json({ ok: true });
+  }
 
   if (text === "/invoice_api_test" || text.startsWith("/invoice_api_test@")) {
     const end = new Date();
