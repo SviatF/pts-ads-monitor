@@ -12,7 +12,9 @@
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "invoice:run": "node scripts/invoice-runner.mjs",
     "invoice:daemon": "node scripts/invoice-daemon.mjs",
-    "invoice:capture-session": "node scripts/meta-session-capture.mjs"
+    "invoice:capture-session": "node scripts/meta-session-capture.mjs",
+    "invoice:local-login": "node scripts/meta-local-login.mjs",
+    "invoice:install-mac": "node scripts/install-mac-agent.mjs"
   },
   "dependencies": {
     "next": "15.5.26",
