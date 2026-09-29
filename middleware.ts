@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_API_PREFIXES = [
-  "/api/monitor",
-  "/api/telegram",
-  "/api/reporting/morning",
-  "/api/reporting/lifecycle",
-];
+function isPublicApi(pathname: string) {
+  if (pathname === "/api/telegram") return true;
+  if (pathname.startsWith("/api/monitor")) return true;
+  if (pathname.startsWith("/api/reporting/morning")) return true;
+  if (pathname.startsWith("/api/reporting/lifecycle")) return true;
+  return false;
+}
 
 export function middleware(request: NextRequest) {
-  if (PUBLIC_API_PREFIXES.some((prefix) => request.nextUrl.pathname.startsWith(prefix))) {
-    return NextResponse.next();
-  }
+  if (isPublicApi(request.nextUrl.pathname)) return NextResponse.next();
 
   const password = process.env.DASHBOARD_PASSWORD;
   if (!password) return NextResponse.next();
