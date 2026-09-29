@@ -7,12 +7,9 @@ import { getReportingConfig, upsertReportingConfig } from "@/lib/reporting-store
 
 export const dynamic = "force-dynamic";
 
-function currentWeekStart() {
+function todayIso() {
   const now = new Date();
-  const utc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const day = utc.getUTCDay() || 7;
-  utc.setUTCDate(utc.getUTCDate() - day + 1);
-  return utc.toISOString().slice(0, 10);
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString().slice(0, 10);
 }
 
 export default async function ReportingSetupPage({
@@ -50,7 +47,7 @@ export default async function ReportingSetupPage({
     const projectName = String(formData.get("projectName") || currentAccountName).trim();
     const goalKey = String(formData.get("goalKey") || "sale");
     const customGoal = String(formData.get("customGoal") || "").trim();
-    const startDate = String(formData.get("startDate") || currentWeekStart());
+    const startDate = String(formData.get("startDate") || todayIso());
 
     let errorMessage = "";
     try {
@@ -82,10 +79,10 @@ export default async function ReportingSetupPage({
     <main className="shell narrowShell">
       <Link href="/" className="backLink">← До кабінетів</Link>
       <div className="setupHero">
-        <div className="eyebrow">PTS Reporting · Setup</div>
+        <div className="eyebrow">PTS Reporting · Project Setup</div>
         <h1>Налаштувати звітність</h1>
         <p className="subtitle">
-          Система створить окрему Google Таблицю з master-шаблону PTS і прив'яже її до цього рекламного кабінету.
+          Одна Google Таблиця = один проєкт. Система збереже прихований PTS master, автоматично створюватиме тижневі аркуші та після закриття місяця — місячний аркуш.
         </p>
       </div>
 
@@ -128,7 +125,7 @@ export default async function ReportingSetupPage({
                 <option key={goal.key} value={goal.key}>{goal.label}</option>
               ))}
             </select>
-            <small>Це поле перебудовує фінальні колонки шаблону: наприклад Продаж → Реєстрації.</small>
+            <small>Фінальна ціль автоматично змінюється в weekly, daily та monthly блоках: наприклад Продаж → Реєстрації.</small>
           </label>
 
           <label>
@@ -137,9 +134,9 @@ export default async function ReportingSetupPage({
           </label>
 
           <label>
-            <span>Початок звітного тижня</span>
-            <input type="date" name="startDate" defaultValue={existing?.report_start_date || currentWeekStart()} required />
-            <small>У master-шаблон автоматично підставляться 7 денних блоків і період звіту.</small>
+            <span>З якої дати вести звітність проєкту</span>
+            <input type="date" name="startDate" defaultValue={existing?.report_start_date || todayIso()} required />
+            <small>Система сама розкладе дату по періодах 01–07, 08–14, 15–21, 22–28 та 29–кінець місяця.</small>
           </label>
 
           <div className="setupActions">
