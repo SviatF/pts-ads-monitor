@@ -1,1 +1,0 @@
-The invoice runner is an isolated browser process. It must load only active invoice subscriptions, open Meta Billing for those account IDs, download newly available PDFs, and submit each document to the application ingestion endpoint. The server remains the source of truth for deduplication and Telegram routing.
