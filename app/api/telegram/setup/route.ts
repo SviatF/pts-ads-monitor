@@ -19,35 +19,67 @@ function authorized(request: NextRequest) {
   return header === `Bearer ${runnerSecret()}`;
 }
 
-export async function POST(request: NextRequest) {
+async function configureWebhook(request: NextRequest) {
+  const webhookUrl = `${request.nextUrl.origin}/api/telegram`;
+  const secretToken = process.env.TELEGRAM_WEBHOOK_SECRET || runnerSecret();
+
+  const setResponse = await fetch(`https://api.telegram.org/bot${telegramToken()}/setWebhook`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      url: webhookUrl,
+      secret_token: secretToken,
+      allowed_updates: ["message"],
+      drop_pending_updates: false,
+    }),
+    cache: "no-store",
+  });
+  const setBody = await setResponse.json();
+  if (!setResponse.ok || !setBody?.ok) {
+    return NextResponse.json({ error: setBody?.description || "Telegram setWebhook failed" }, { status: 502 });
+  }
+
+  const infoResponse = await fetch(`https://api.telegram.org/bot${telegramToken()}/getWebhookInfo`, {
+    cache: "no-store",
+  });
+  const infoBody = await infoResponse.json();
+
+  return NextResponse.json({
+    ok: true,
+    webhook_url: webhookUrl,
+    description: setBody.description || null,
+    webhook_info: infoBody?.result
+      ? {
+          url: infoBody.result.url,
+          pending_update_count: infoBody.result.pending_update_count,
+          last_error_date: infoBody.result.last_error_date || null,
+          last_error_message: infoBody.result.last_error_message || null,
+          allowed_updates: infoBody.result.allowed_updates || [],
+        }
+      : null,
+  });
+}
+
+// Browser-friendly setup route. Access is protected by the dashboard Basic Auth middleware.
+export async function GET(request: NextRequest) {
   try {
-    if (!authorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const webhookUrl = `${request.nextUrl.origin}/api/telegram`;
-    const secretToken = process.env.TELEGRAM_WEBHOOK_SECRET || runnerSecret();
-
-    const response = await fetch(`https://api.telegram.org/bot${telegramToken()}/setWebhook`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: webhookUrl,
-        secret_token: secretToken,
-        allowed_updates: ["message"],
-        drop_pending_updates: true,
-      }),
-      cache: "no-store",
-    });
-
-    const body = await response.json();
-    if (!response.ok || !body?.ok) {
-      return NextResponse.json({ error: body?.description || "Telegram setWebhook failed" }, { status: 502 });
-    }
-
-    return NextResponse.json({ ok: true, webhook_url: webhookUrl, description: body.description || null });
+    return await configureWebhook(request);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
+      { status: 500 },
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    if (!authorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return await configureWebhook(request);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 500 },
     );
   }
 }
