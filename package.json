@@ -13,7 +13,7 @@
     "invoice:run": "node scripts/invoice-runner.mjs"
   },
   "dependencies": {
-    "next": "15.5.2",
+    "next": "15.5.26",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "@opennextjs/cloudflare": "latest"
