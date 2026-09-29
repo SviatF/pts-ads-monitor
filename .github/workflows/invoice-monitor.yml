@@ -1,0 +1,61 @@
+name: Meta Invoice Monitor
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: meta-invoice-monitor
+  cancel-in-progress: false
+
+jobs:
+  invoices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      INVOICE_APP_BASE_URL: ${{ secrets.INVOICE_APP_BASE_URL }}
+      INVOICE_RUNNER_SECRET: ${{ secrets.INVOICE_RUNNER_SECRET }}
+      META_STORAGE_STATE_B64: ${{ secrets.META_STORAGE_STATE_B64 }}
+      META_STORAGE_STATE: meta-storage-state.json
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INVOICE_APP_BASE_URL" || { echo "Missing INVOICE_APP_BASE_URL secret"; exit 1; }
+          test -n "$INVOICE_RUNNER_SECRET" || { echo "Missing INVOICE_RUNNER_SECRET secret"; exit 1; }
+          test -n "$META_STORAGE_STATE_B64" || { echo "Missing META_STORAGE_STATE_B64 secret"; exit 1; }
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Restore Meta browser session
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$META_STORAGE_STATE_B64" | base64 --decode > "$META_STORAGE_STATE"
+          node -e "JSON.parse(require('fs').readFileSync(process.env.META_STORAGE_STATE, 'utf8')); console.log('Meta storage state JSON is valid')"
+
+      - name: Check Meta invoices
+        run: npm run invoice:run
+
+      - name: Remove browser session file
+        if: always()
+        shell: bash
+        run: rm -f "$META_STORAGE_STATE"
