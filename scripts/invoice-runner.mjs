@@ -88,19 +88,169 @@ function extractInvoiceKey(text = '', href = '') {
   return crypto.createHash('sha256').update(`${text}|${href}`).digest('hex').slice(0, 32);
 }
 
+function isoToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function daysInclusive(startIso, endIso) {
+  const start = new Date(`${startIso}T00:00:00Z`);
+  const end = new Date(`${endIso}T00:00:00Z`);
+  return Math.floor((end - start) / 86400000) + 1;
+}
+
+function usDate(iso) {
+  const [y, m, d] = iso.split('-');
+  return `${m}/${d}/${y}`;
+}
+
+async function visibleDateRangeTrigger(page) {
+  const monthPattern = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+20\d{2}\s*[–—-]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+20\d{2}\b/i;
+  const controls = page.locator('button, [role="button"]');
+  const count = await controls.count().catch(() => 0);
+  for (let i = 0; i < Math.min(count, 300); i += 1) {
+    const control = controls.nth(i);
+    if (!(await control.isVisible().catch(() => false))) continue;
+    const text = (await control.innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+    if (monthPattern.test(text)) return { control, text };
+  }
+  return null;
+}
+
+async function clickVisibleText(page, regex) {
+  const candidates = page.getByText(regex, { exact: false });
+  const count = await candidates.count().catch(() => 0);
+  for (let i = 0; i < Math.min(count, 30); i += 1) {
+    const item = candidates.nth(i);
+    if (await item.isVisible().catch(() => false)) {
+      await item.click({ timeout: 5000 }).catch(() => {});
+      return true;
+    }
+  }
+  return false;
+}
+
+async function setBillingDateRange(page, startDate, endDate) {
+  const trigger = await visibleDateRangeTrigger(page);
+  if (!trigger) {
+    console.warn(`Could not locate Meta Billing date-range control; requested ${startDate} → ${endDate}`);
+    return false;
+  }
+
+  console.log(`Current Meta Billing range: ${trigger.text}`);
+  await trigger.control.click({ timeout: 10000 });
+  await page.waitForTimeout(700);
+
+  const spanDays = daysInclusive(startDate, endDate);
+  const presetNames = [];
+  if (spanDays <= 7) presetNames.push(/last\s+7\s+days/i);
+  if (spanDays <= 30) presetNames.push(/last\s+30\s+days/i);
+  if (spanDays <= 90) presetNames.push(/last\s+90\s+days/i);
+
+  for (const preset of presetNames) {
+    if (await clickVisibleText(page, preset)) {
+      await page.waitForTimeout(2500);
+      console.log(`Applied Meta Billing preset matching ${spanDays} day(s)`);
+      return true;
+    }
+  }
+
+  await clickVisibleText(page, /custom|custom range|date range/i);
+  await page.waitForTimeout(500);
+
+  const visibleInputs = [];
+  const inputs = page.locator('input');
+  const inputCount = await inputs.count().catch(() => 0);
+  for (let i = 0; i < Math.min(inputCount, 100); i += 1) {
+    const input = inputs.nth(i);
+    if (!(await input.isVisible().catch(() => false))) continue;
+    const placeholder = (await input.getAttribute('placeholder').catch(() => '')) || '';
+    const aria = (await input.getAttribute('aria-label').catch(() => '')) || '';
+    const type = (await input.getAttribute('type').catch(() => '')) || '';
+    if (/date|mm|dd|yyyy|start|end/i.test(`${placeholder} ${aria} ${type}`)) visibleInputs.push(input);
+  }
+
+  if (visibleInputs.length >= 2) {
+    const values = [usDate(startDate), usDate(endDate)];
+    for (let i = 0; i < 2; i += 1) {
+      await visibleInputs[i].fill(values[i]).catch(async () => {
+        await visibleInputs[i].press('Meta+A').catch(() => {});
+        await visibleInputs[i].type(values[i]).catch(() => {});
+      });
+    }
+    const applied = await clickVisibleText(page, /apply|update|done|save/i);
+    if (applied) {
+      await page.waitForTimeout(2500);
+      console.log(`Applied custom Meta Billing range ${startDate} → ${endDate}`);
+      return true;
+    }
+  }
+
+  await page.keyboard.press('Escape').catch(() => {});
+  console.warn(`Could not automatically apply Meta Billing range ${startDate} → ${endDate}`);
+  return false;
+}
+
+async function loadAllTransactionRows(page) {
+  let previousCount = -1;
+  let stablePasses = 0;
+
+  for (let pass = 0; pass < 40; pass += 1) {
+    const rows = page.locator('tr, [role="row"]');
+    const before = await rows.count().catch(() => 0);
+
+    let clickedMore = false;
+    for (const re of [/see more/i, /show more/i, /load more/i]) {
+      const controls = page.getByText(re, { exact: false });
+      const count = await controls.count().catch(() => 0);
+      for (let i = count - 1; i >= 0; i -= 1) {
+        const c = controls.nth(i);
+        if (await c.isVisible().catch(() => false)) {
+          await c.click({ timeout: 5000 }).catch(() => {});
+          clickedMore = true;
+          break;
+        }
+      }
+      if (clickedMore) break;
+    }
+
+    if (!clickedMore) {
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+    }
+
+    await page.waitForTimeout(1200);
+    const after = await rows.count().catch(() => 0);
+
+    if (after <= previousCount && after <= before) stablePasses += 1;
+    else stablePasses = 0;
+    previousCount = Math.max(after, before);
+
+    if (stablePasses >= 3) break;
+  }
+
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+  await page.waitForTimeout(400);
+}
+
 async function discoverInvoiceDownloads(page, account) {
   const billingUrl = `https://business.facebook.com/billing_hub/payment_activity?asset_id=${encodeURIComponent(account.accountId)}`;
   await page.goto(billingUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
   await page.waitForTimeout(7000);
   if (/login|checkpoint|two_factor|security\/block/i.test(page.url())) throw new Error('META_SESSION_EXPIRED');
 
+  const endDate = isoToday();
+  const rangeApplied = await setBillingDateRange(page, account.earliestStartDate, endDate);
+  if (!rangeApplied) console.warn('Continuing with currently visible Meta Billing date range');
+
+  await loadAllTransactionRows(page);
+
   const candidates = [];
   const seen = new Set();
 
-  // Current Meta Billing UI exposes VAT invoice IDs (FBADS-...) in each paid transaction row.
   const rows = page.locator('tr, [role="row"]').filter({ hasText: /FBADS-/i });
   const rowCount = await rows.count().catch(() => 0);
-  for (let i = 0; i < Math.min(rowCount, 200); i += 1) {
+  console.log(`Loaded ${rowCount} row(s) containing FBADS invoice IDs`);
+
+  for (let i = 0; i < Math.min(rowCount, 1000); i += 1) {
     const row = rows.nth(i);
     const contextText = await row.innerText().catch(() => '');
     if (!/\bFBADS-/i.test(contextText)) continue;
@@ -109,8 +259,6 @@ async function discoverInvoiceDownloads(page, account) {
     const key = extractInvoiceKey(contextText);
     if (seen.has(key)) continue;
 
-    // The Action column is currently an icon-only button. Prefer explicit download labels,
-    // then fall back to the last button in the VAT-invoice row.
     let item = row.locator('[aria-label*="download" i], [title*="download" i], a[download]').first();
     if (!(await item.count().catch(() => 0))) item = row.locator('button').last();
     if (!(await item.count().catch(() => 0))) continue;
@@ -119,12 +267,11 @@ async function discoverInvoiceDownloads(page, account) {
     candidates.push({ item, href: '', key, contextText, invoiceDate });
   }
 
-  // Backward-compatible fallback for alternate Meta layouts.
   if (!candidates.length) {
     for (const selector of ['a:has-text("Download")','button:has-text("Download")','a:has-text("Invoice")','button:has-text("Invoice")']) {
       const items = page.locator(selector);
       const count = await items.count().catch(() => 0);
-      for (let i = 0; i < Math.min(count, 100); i += 1) {
+      for (let i = 0; i < Math.min(count, 500); i += 1) {
         const item = items.nth(i);
         const row = item.locator('xpath=ancestor-or-self::*[self::tr or @role="row"][1]');
         const contextText = await row.first().innerText().catch(() => '');
@@ -201,7 +348,7 @@ async function main() {
   let sessionExpired = false;
   try {
     for (const account of accounts) {
-      console.log(`Checking ${account.accountId} (${account.accountName})`);
+      console.log(`Checking ${account.accountId} (${account.accountName}) from ${account.earliestStartDate}`);
       try {
         const candidates = await discoverInvoiceDownloads(page, account);
         console.log(`Found ${candidates.length} VAT invoice candidate(s)`);
