@@ -41,6 +41,7 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
     const goalKey = String(formData.get("goalKey") || "sale");
     const customGoal = String(formData.get("customGoal") || "").trim();
     const startDate = String(formData.get("startDate") || todayIso());
+    const replacing = String(formData.get("replaceExisting") || "") === "1";
     try {
       const report = await createProjectReport({ projectName, goalKey, customGoal, startDate });
       await upsertReportingConfig({ meta_account_id: currentAccountId, project_name: projectName, goal_key: goalKey, goal_label: report.goalLabel, currency: null, timezone: "Europe/Kyiv", report_start_date: report.startDate, report_end_date: report.endDate, report_file_id: report.fileId, report_url: report.url, status: "configured" });
@@ -49,7 +50,10 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
     } catch (error) {
       redirect(`/reporting/${encodeURIComponent(currentAccountId)}?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
     }
-    redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent("Звіт створено. Формули активовані.")}`);
+    const message = replacing
+      ? "Звіт перестворено. Нову Google-таблицю підключено до проєкту; стара таблиця залишилась без змін як backup."
+      : "Звіт створено. Формули активовані.";
+    redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent(message)}`);
   }
 
   async function syncMeta(formData: FormData) {
@@ -96,7 +100,8 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
           <label><span>Кінцева ціль запусків</span><select name="goalKey" defaultValue={existing?.goal_key || "sale"}>{REPORTING_GOALS.map((goal) => <option key={goal.key} value={goal.key}>{goal.label}</option>)}</select><small>Фінальна ціль автоматично змінюється в weekly, daily та monthly блоках: наприклад Продаж → Реєстрації.</small></label>
           <label><span>Інша ціль, якщо обрано «Інше»</span><input name="customGoal" placeholder="Наприклад: Депозит, Договір, Оплата" /></label>
           <label><span>З якої дати вести звітність проєкту</span><input type="date" name="startDate" defaultValue={existing?.report_start_date || todayIso()} required /><small>Фіксовані 4 періоди місяця: 01–07, 08–15, 16–22, 23–кінець місяця. О 07:00 першого дня нового періоду система автоматично створює новий аркуш; 1 числа спочатку закриває минулий місяць місячним аркушем.</small></label>
-          <div className="setupActions"><button className="runButton primaryAction" type="submit">{existing ? "Створити новий звіт" : "Створити Google звіт"}</button><Link href="/" className="secondaryButton">Скасувати</Link></div>
+          {existing ? <input type="hidden" name="replaceExisting" value="1" /> : null}
+          {existing ? <div className="dangerZone"><div><strong>Перестворити звіт</strong><p>Буде створена нова Google-таблиця з актуального master-шаблону та підключена до цього проєкту. Поточна таблиця не видаляється і залишиться як backup.</p></div><button className="runButton dangerAction" type="submit">Перестворити звіт</button></div> : <div className="setupActions"><button className="runButton primaryAction" type="submit">Створити Google звіт</button><Link href="/" className="secondaryButton">Скасувати</Link></div>}
         </form>
       </section>
     </main>
