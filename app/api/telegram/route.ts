@@ -13,7 +13,7 @@ import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
 export const dynamic = "force-dynamic";
 
 function webhookAuthorized(request: NextRequest) {
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET || process.env.INVOICE_RUNNER_SECRET;
   if (!secret) return process.env.NODE_ENV !== "production";
   return request.headers.get("x-telegram-bot-api-secret-token") === secret;
 }
