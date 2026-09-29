@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getStoredAccount } from "@/lib/store";
 import { createProjectReport, REPORTING_GOALS } from "@/lib/google-reporting-user";
+import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
 import { getReportingConfig, upsertReportingConfig } from "@/lib/reporting-store";
+import { syncMetaReporting } from "@/lib/meta-reporting-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -12,12 +14,19 @@ function todayIso() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString().slice(0, 10);
 }
 
+function previousMonthRange() {
+  const now = new Date();
+  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const last = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+  return { since: first.toISOString().slice(0, 10), until: last.toISOString().slice(0, 10) };
+}
+
 export default async function ReportingSetupPage({
   params,
   searchParams,
 }: {
   params: Promise<{ accountId: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const { accountId } = await params;
   const query = await searchParams;
@@ -40,6 +49,7 @@ export default async function ReportingSetupPage({
 
   const currentAccountId = account.meta_account_id;
   const currentAccountName = account.name;
+  const previousMonth = previousMonthRange();
 
   async function createReport(formData: FormData) {
     "use server";
@@ -49,7 +59,6 @@ export default async function ReportingSetupPage({
     const customGoal = String(formData.get("customGoal") || "").trim();
     const startDate = String(formData.get("startDate") || todayIso());
 
-    let errorMessage = "";
     try {
       const report = await createProjectReport({ projectName, goalKey, customGoal, startDate });
       await upsertReportingConfig({
@@ -67,12 +76,51 @@ export default async function ReportingSetupPage({
       });
       revalidatePath("/");
       revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
-      redirect("/");
     } catch (error) {
-      errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      redirect(`/reporting/${encodeURIComponent(currentAccountId)}?error=${encodeURIComponent(errorMessage)}`);
     }
 
-    redirect(`/reporting/${encodeURIComponent(currentAccountId)}?error=${encodeURIComponent(errorMessage)}`);
+    redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent("Звіт створено. Формули активовані.")}`);
+  }
+
+  async function syncMeta(formData: FormData) {
+    "use server";
+
+    const since = String(formData.get("since") || "");
+    const until = String(formData.get("until") || "");
+    let successMessage = "";
+
+    try {
+      const config = await getReportingConfig(currentAccountId);
+      if (!config) throw new Error("Спочатку потрібно створити Google звіт для цього кабінету.");
+      if (!since || !until) throw new Error("Вкажіть період синхронізації.");
+      if (since > until) throw new Error("Дата початку не може бути пізніше дати завершення.");
+
+      await ensureProjectReportLifecycle({
+        spreadsheetId: config.report_file_id,
+        projectName: config.project_name,
+        goalKey: config.goal_key,
+        goalLabel: config.goal_label,
+        reportingStartDate: since,
+      });
+
+      const result = await syncMetaReporting({
+        accountId: currentAccountId,
+        spreadsheetId: config.report_file_id,
+        since,
+        until,
+      });
+
+      const unmappedPreview = result.unmappedCampaigns.slice(0, 5).join("; ");
+      successMessage = `Meta sync: ${result.insightRows} campaign-day rows, ${result.mappedCampaigns.length} mapped campaigns, ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
+      revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      redirect(`/reporting/${encodeURIComponent(currentAccountId)}?error=${encodeURIComponent(errorMessage)}`);
+    }
+
+    redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent(successMessage)}`);
   }
 
   return (
@@ -82,7 +130,7 @@ export default async function ReportingSetupPage({
         <div className="eyebrow">PTS Reporting · Project Setup</div>
         <h1>Налаштувати звітність</h1>
         <p className="subtitle">
-          Одна Google Таблиця = один проєкт. Система збереже прихований PTS master, автоматично створюватиме тижневі аркуші та після закриття місяця — місячний аркуш.
+          Одна Google Таблиця = один проєкт. Meta автоматично заповнює лише B (ліди/результати) та E (витрати), менеджери працюють з G/H/J/L/M/O, решта KPI та weekly totals рахуються формулами.
         </p>
       </div>
 
@@ -111,6 +159,28 @@ export default async function ReportingSetupPage({
         ) : null}
 
         {query.error ? <div className="formError">{query.error}</div> : null}
+        {query.message ? <div className="empty good">{query.message}</div> : null}
+
+        {existing ? (
+          <form action={syncMeta} className="setupForm">
+            <div className="eyebrow">Meta Ads → Daily reporting</div>
+            <h2>Синхронізувати дані кабінету</h2>
+            <p className="subtitle">
+              Mapping: Direct/Messenger → Direct / Messenger; LeadForm/Lead Form → Lead Form; Quiz → Quiz; Site/Website/Web → Site. Невідомі назви не записуються навмання.
+            </p>
+            <label>
+              <span>Період від</span>
+              <input type="date" name="since" defaultValue={previousMonth.since} required />
+            </label>
+            <label>
+              <span>Період до</span>
+              <input type="date" name="until" defaultValue={previousMonth.until} required />
+            </label>
+            <div className="setupActions">
+              <button className="runButton primaryAction" type="submit">Синхронізувати Meta → звіт</button>
+            </div>
+          </form>
+        ) : null}
 
         <form action={createReport} className="setupForm">
           <label>
