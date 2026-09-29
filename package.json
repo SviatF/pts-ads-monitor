@@ -12,6 +12,7 @@
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "invoice:run": "node scripts/invoice-runner-supervisor.mjs",
     "invoice:run-raw": "node scripts/invoice-runner.mjs",
+    "invoice:probe": "node --env-file=.env.invoice-agent scripts/invoice-network-probe.mjs",
     "invoice:daemon": "node scripts/invoice-daemon.mjs",
     "invoice:capture-session": "node scripts/meta-session-capture.mjs",
     "invoice:local-login": "node scripts/meta-local-login.mjs",
