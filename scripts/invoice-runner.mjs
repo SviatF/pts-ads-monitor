@@ -1,5 +1,4 @@
 import { chromium } from 'playwright';
-import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -103,11 +102,18 @@ function usDate(iso) {
   return `${m}/${d}/${y}`;
 }
 
+function longDateLabels(iso) {
+  const date = new Date(`${iso}T12:00:00Z`);
+  const long = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date);
+  const short = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date);
+  return [long, short];
+}
+
 async function visibleDateRangeTrigger(page) {
   const monthPattern = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+20\d{2}\s*[–—-]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+20\d{2}\b/i;
   const controls = page.locator('button, [role="button"]');
   const count = await controls.count().catch(() => 0);
-  for (let i = 0; i < Math.min(count, 300); i += 1) {
+  for (let i = 0; i < Math.min(count, 400); i += 1) {
     const control = controls.nth(i);
     if (!(await control.isVisible().catch(() => false))) continue;
     const text = (await control.innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
@@ -119,10 +125,25 @@ async function visibleDateRangeTrigger(page) {
 async function clickVisibleText(page, regex) {
   const candidates = page.getByText(regex, { exact: false });
   const count = await candidates.count().catch(() => 0);
-  for (let i = 0; i < Math.min(count, 30); i += 1) {
+  for (let i = 0; i < Math.min(count, 60); i += 1) {
     const item = candidates.nth(i);
     if (await item.isVisible().catch(() => false)) {
-      await item.click({ timeout: 5000 }).catch(() => {});
+      if (await item.click({ timeout: 5000 }).then(() => true).catch(() => false)) return true;
+    }
+  }
+  return false;
+}
+
+async function clickCalendarDate(page, iso) {
+  for (const label of longDateLabels(iso)) {
+    const exact = page.getByRole('button', { name: label, exact: true });
+    if (await exact.first().isVisible().catch(() => false)) {
+      await exact.first().click({ timeout: 5000 });
+      return true;
+    }
+    const loose = page.locator(`[aria-label*="${label.replaceAll('"', '\\"')}"]`).first();
+    if (await loose.isVisible().catch(() => false)) {
+      await loose.click({ timeout: 5000 });
       return true;
     }
   }
@@ -138,29 +159,31 @@ async function setBillingDateRange(page, startDate, endDate) {
 
   console.log(`Current Meta Billing range: ${trigger.text}`);
   await trigger.control.click({ timeout: 10000 });
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(800);
 
   const spanDays = daysInclusive(startDate, endDate);
-  const presetNames = [];
-  if (spanDays <= 7) presetNames.push(/last\s+7\s+days/i);
-  if (spanDays <= 30) presetNames.push(/last\s+30\s+days/i);
-  if (spanDays <= 90) presetNames.push(/last\s+90\s+days/i);
+  const presetPatterns = spanDays <= 30
+    ? [/last\s*30\s*days/i, /past\s*30\s*days/i, /30\s*days/i]
+    : spanDays <= 90
+      ? [/last\s*90\s*days/i, /past\s*90\s*days/i, /90\s*days/i]
+      : [];
 
-  for (const preset of presetNames) {
+  for (const preset of presetPatterns) {
     if (await clickVisibleText(page, preset)) {
       await page.waitForTimeout(2500);
-      console.log(`Applied Meta Billing preset matching ${spanDays} day(s)`);
+      const updated = await visibleDateRangeTrigger(page);
+      console.log(`Applied Meta Billing preset; range is now: ${updated?.text || 'updated'}`);
       return true;
     }
   }
 
   await clickVisibleText(page, /custom|custom range|date range/i);
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(800);
 
   const visibleInputs = [];
   const inputs = page.locator('input');
   const inputCount = await inputs.count().catch(() => 0);
-  for (let i = 0; i < Math.min(inputCount, 100); i += 1) {
+  for (let i = 0; i < Math.min(inputCount, 120); i += 1) {
     const input = inputs.nth(i);
     if (!(await input.isVisible().catch(() => false))) continue;
     const placeholder = (await input.getAttribute('placeholder').catch(() => '')) || '';
@@ -177,13 +200,24 @@ async function setBillingDateRange(page, startDate, endDate) {
         await visibleInputs[i].type(values[i]).catch(() => {});
       });
     }
-    const applied = await clickVisibleText(page, /apply|update|done|save/i);
-    if (applied) {
+    if (await clickVisibleText(page, /apply|update|done|save/i)) {
       await page.waitForTimeout(2500);
       console.log(`Applied custom Meta Billing range ${startDate} → ${endDate}`);
       return true;
     }
   }
+
+  const clickedStart = await clickCalendarDate(page, startDate);
+  const clickedEnd = clickedStart ? await clickCalendarDate(page, endDate) : false;
+  if (clickedStart && clickedEnd && await clickVisibleText(page, /apply|update|done|save/i)) {
+    await page.waitForTimeout(2500);
+    console.log(`Applied calendar Meta Billing range ${startDate} → ${endDate}`);
+    return true;
+  }
+
+  const popupText = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  const hints = [...popupText.matchAll(/(?:Last|Past)\s+\d+\s+days/gi)].map((m) => m[0]).slice(0, 10);
+  if (hints.length) console.warn(`Visible date presets: ${hints.join(', ')}`);
 
   await page.keyboard.press('Escape').catch(() => {});
   console.warn(`Could not automatically apply Meta Billing range ${startDate} → ${endDate}`);
@@ -194,7 +228,7 @@ async function loadAllTransactionRows(page) {
   let previousCount = -1;
   let stablePasses = 0;
 
-  for (let pass = 0; pass < 40; pass += 1) {
+  for (let pass = 0; pass < 50; pass += 1) {
     const rows = page.locator('tr, [role="row"]');
     const before = await rows.count().catch(() => 0);
 
@@ -205,17 +239,16 @@ async function loadAllTransactionRows(page) {
       for (let i = count - 1; i >= 0; i -= 1) {
         const c = controls.nth(i);
         if (await c.isVisible().catch(() => false)) {
-          await c.click({ timeout: 5000 }).catch(() => {});
-          clickedMore = true;
-          break;
+          if (await c.click({ timeout: 5000 }).then(() => true).catch(() => false)) {
+            clickedMore = true;
+            break;
+          }
         }
       }
       if (clickedMore) break;
     }
 
-    if (!clickedMore) {
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
-    }
+    if (!clickedMore) await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
 
     await page.waitForTimeout(1200);
     const after = await rows.count().catch(() => 0);
@@ -223,7 +256,6 @@ async function loadAllTransactionRows(page) {
     if (after <= previousCount && after <= before) stablePasses += 1;
     else stablePasses = 0;
     previousCount = Math.max(after, before);
-
     if (stablePasses >= 3) break;
   }
 
@@ -245,7 +277,6 @@ async function discoverInvoiceDownloads(page, account) {
 
   const candidates = [];
   const seen = new Set();
-
   const rows = page.locator('tr, [role="row"]').filter({ hasText: /FBADS-/i });
   const rowCount = await rows.count().catch(() => 0);
   console.log(`Loaded ${rowCount} row(s) containing FBADS invoice IDs`);
@@ -267,25 +298,13 @@ async function discoverInvoiceDownloads(page, account) {
     candidates.push({ item, href: '', key, contextText, invoiceDate });
   }
 
-  if (!candidates.length) {
-    for (const selector of ['a:has-text("Download")','button:has-text("Download")','a:has-text("Invoice")','button:has-text("Invoice")']) {
-      const items = page.locator(selector);
-      const count = await items.count().catch(() => 0);
-      for (let i = 0; i < Math.min(count, 500); i += 1) {
-        const item = items.nth(i);
-        const row = item.locator('xpath=ancestor-or-self::*[self::tr or @role="row"][1]');
-        const contextText = await row.first().innerText().catch(() => '');
-        const invoiceDate = parseInvoiceDate(contextText);
-        if (!invoiceDate || invoiceDate < account.earliestStartDate) continue;
-        const href = (await item.getAttribute('href').catch(() => null)) || '';
-        const key = extractInvoiceKey(contextText, href);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        candidates.push({ item, href, key, contextText, invoiceDate });
-      }
-    }
-  }
   return candidates;
+}
+
+async function streamToBuffer(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
 }
 
 async function downloadCandidate(page, candidate) {
@@ -293,11 +312,16 @@ async function downloadCandidate(page, candidate) {
   await candidate.item.click({ timeout: 15000 });
   const download = await downloadPromise;
   if (!download) return null;
-  const filePath = await download.path();
-  if (!filePath) return null;
-  const buffer = await readFile(filePath);
-  if (!buffer.subarray(0, 4).equals(Buffer.from('%PDF'))) return null;
-  return { buffer, filename: download.suggestedFilename() || `Meta_Invoice_${candidate.key}.pdf` };
+
+  const stream = await download.createReadStream().catch(() => null);
+  if (!stream) return null;
+  const buffer = await streamToBuffer(stream);
+  if (!buffer.length || !buffer.subarray(0, 4).equals(Buffer.from('%PDF'))) return null;
+
+  return {
+    buffer,
+    filename: download.suggestedFilename() || `Meta_Invoice_${candidate.key}.pdf`,
+  };
 }
 
 async function sendPdf(account, candidate, file) {
@@ -310,8 +334,11 @@ async function sendPdf(account, candidate, file) {
   const currency = parseCurrency(candidate.contextText, account.currency);
   if (currency) form.set('currency', currency);
   form.set('pdf', new Blob([file.buffer], { type: 'application/pdf' }), file.filename);
+
   const response = await fetch(`${APP_BASE_URL.replace(/\/$/, '')}/api/invoices/ingest`, {
-    method: 'POST', headers: { Authorization: `Bearer ${RUNNER_SECRET}` }, body: form,
+    method: 'POST',
+    headers: { Authorization: `Bearer ${RUNNER_SECRET}` },
+    body: form,
   });
   if (!response.ok) throw new Error(`ingest failed: ${response.status} ${await response.text()}`);
   return response.json();
@@ -329,7 +356,9 @@ async function openContext() {
   if (META_USER_DATA_DIR) {
     const profileDir = META_USER_DATA_DIR.replace(/^~(?=$|\/)/, os.homedir());
     return chromium.launchPersistentContext(path.resolve(profileDir), {
-      channel: 'chrome', headless: META_HEADLESS, acceptDownloads: true,
+      channel: 'chrome',
+      headless: META_HEADLESS,
+      acceptDownloads: true,
     });
   }
   const browser = await chromium.launch({ headless: true });
@@ -346,30 +375,50 @@ async function main() {
   const context = await openContext();
   const page = context.pages()[0] || await context.newPage();
   let sessionExpired = false;
+
   try {
     for (const account of accounts) {
       console.log(`Checking ${account.accountId} (${account.accountName}) from ${account.earliestStartDate}`);
       try {
         const candidates = await discoverInvoiceDownloads(page, account);
         console.log(`Found ${candidates.length} VAT invoice candidate(s)`);
+
         for (const candidate of candidates) {
           if (await alreadyDelivered(account, candidate)) continue;
-          const file = await downloadCandidate(page, candidate);
-          if (!file) { console.warn(`No PDF download for ${candidate.key}`); continue; }
-          const result = await sendPdf(account, candidate, file);
-          console.log(`Invoice ${candidate.key}: delivered=${result.delivered?.length || 0}, skipped=${result.skipped?.length || 0}`);
+
+          try {
+            const file = await downloadCandidate(page, candidate);
+            if (!file) {
+              console.warn(`No PDF download for ${candidate.key}`);
+              continue;
+            }
+            const result = await sendPdf(account, candidate, file);
+            console.log(`Invoice ${candidate.key}: delivered=${result.delivered?.length || 0}, skipped=${result.skipped?.length || 0}`);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(`Invoice ${candidate.key}: ${message}`);
+            if (page.isClosed()) throw new Error('BROWSER_CLOSED_DURING_DOWNLOAD');
+          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`Account ${account.accountId}: ${message}`);
-        if (message === 'META_SESSION_EXPIRED') { sessionExpired = true; break; }
+        if (message === 'META_SESSION_EXPIRED') {
+          sessionExpired = true;
+          break;
+        }
+        if (message === 'BROWSER_CLOSED_DURING_DOWNLOAD') break;
       }
     }
   } finally {
-    await context.close();
+    await context.close().catch(() => {});
     if (context.__browser) await context.__browser.close().catch(() => {});
   }
+
   if (sessionExpired) process.exitCode = 2;
 }
 
-main().catch((error) => { console.error(error); process.exit(1); });
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
