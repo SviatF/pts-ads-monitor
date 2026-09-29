@@ -113,7 +113,7 @@ export default async function ReportingSetupPage({
       });
 
       const unmappedPreview = result.unmappedCampaigns.slice(0, 5).join("; ");
-      successMessage = `Meta sync: ${result.insightRows} campaign-day rows, ${result.mappedCampaigns.length} mapped campaigns, ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
+      successMessage = `Meta sync ${since} → ${until}: ${result.insightRows} campaign-day rows; ${result.mappedCampaigns.length} mapped campaigns; leads=${result.mappedLeads}; spend=$${result.mappedSpend}; ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
       revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -166,7 +166,7 @@ export default async function ReportingSetupPage({
             <div className="eyebrow">Meta Ads → Daily reporting</div>
             <h2>Синхронізувати дані кабінету</h2>
             <p className="subtitle">
-              Mapping: Direct/Messenger → Direct / Messenger; LeadForm/Lead Form → Lead Form; Quiz → Quiz; Site/Website/Web → Site. Невідомі назви не записуються навмання.
+              Mapping: Direct/Messenger → Direct / Messenger; LeadForm/Leads-Form/Lead Form/legacy Leads → Lead Form; Quiz → Quiz; Site/Website/Web → Site. Невідомі назви не записуються навмання.
             </p>
             <label>
               <span>Період від</span>
