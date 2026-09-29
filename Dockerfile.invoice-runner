@@ -1,0 +1,13 @@
+FROM mcr.microsoft.com/playwright:v1.55.0-noble
+
+WORKDIR /app
+
+COPY package.json ./
+RUN npm install --no-audit --no-fund
+
+COPY scripts ./scripts
+
+ENV NODE_ENV=production
+ENV INVOICE_POLL_MINUTES=15
+
+CMD ["node", "scripts/invoice-daemon.mjs"]
