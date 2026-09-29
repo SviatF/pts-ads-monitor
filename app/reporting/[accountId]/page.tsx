@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getStoredAccount } from "@/lib/store";
 import { createProjectReport, REPORTING_GOALS } from "@/lib/google-reporting-user";
+import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
 import { getReportingConfig, upsertReportingConfig } from "@/lib/reporting-store";
 import { syncMetaReporting } from "@/lib/meta-reporting-sync";
 
@@ -88,11 +89,21 @@ export default async function ReportingSetupPage({
 
     const since = String(formData.get("since") || "");
     const until = String(formData.get("until") || "");
+    let successMessage = "";
+
     try {
       const config = await getReportingConfig(currentAccountId);
       if (!config) throw new Error("Спочатку потрібно створити Google звіт для цього кабінету.");
       if (!since || !until) throw new Error("Вкажіть період синхронізації.");
       if (since > until) throw new Error("Дата початку не може бути пізніше дати завершення.");
+
+      await ensureProjectReportLifecycle({
+        spreadsheetId: config.report_file_id,
+        projectName: config.project_name,
+        goalKey: config.goal_key,
+        goalLabel: config.goal_label,
+        reportingStartDate: since,
+      });
 
       const result = await syncMetaReporting({
         accountId: currentAccountId,
@@ -101,14 +112,15 @@ export default async function ReportingSetupPage({
         until,
       });
 
-      const unmapped = result.unmappedCampaigns.length;
-      const message = `Meta sync: ${result.insightRows} campaign-day rows, ${result.mappedCampaigns.length} mapped campaigns, ${unmapped} unmapped.`;
+      const unmappedPreview = result.unmappedCampaigns.slice(0, 5).join("; ");
+      successMessage = `Meta sync: ${result.insightRows} campaign-day rows, ${result.mappedCampaigns.length} mapped campaigns, ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
       revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
-      redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent(message)}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       redirect(`/reporting/${encodeURIComponent(currentAccountId)}?error=${encodeURIComponent(errorMessage)}`);
     }
+
+    redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent(successMessage)}`);
   }
 
   return (
