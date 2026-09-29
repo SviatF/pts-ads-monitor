@@ -2,6 +2,7 @@ import { getGoogleUserAccessToken } from "@/lib/google-oauth";
 import { dailyBlocksForDays } from "@/lib/report-template";
 import { applyReportFormulas } from "@/lib/report-formulas";
 import { dayIndexInPeriod, parseIsoDate, periodForDate, periodLength } from "@/lib/report-periods";
+import { syncCampaignPerformanceSheets, type CampaignPerformanceRow } from "@/lib/campaign-report-sheet";
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v26.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -19,6 +20,17 @@ const RESULT_ACTION_PRIORITY: Record<Channel, string[]> = {
   quiz: ["offsite_conversion.fb_pixel_lead", "lead", "onsite_conversion.contact_website", "offsite_conversion.fb_pixel_contact", "contact"],
   site: ["offsite_conversion.fb_pixel_lead", "lead", "onsite_conversion.contact_website", "offsite_conversion.fb_pixel_contact", "contact"],
 };
+
+const GENERIC_RESULT_ACTION_PRIORITY = [
+  "onsite_conversion.messaging_conversation_started_7d",
+  "messaging_conversation_started_7d",
+  "onsite_conversion.lead_grouped",
+  "offsite_conversion.fb_pixel_lead",
+  "lead",
+  "onsite_conversion.contact_website",
+  "offsite_conversion.fb_pixel_contact",
+  "contact",
+];
 
 function metaToken() {
   const value = process.env.META_ACCESS_TOKEN;
@@ -40,12 +52,24 @@ export function mapCampaignToChannel(name: string): Channel | null {
   return null;
 }
 
+function actionMap(actions: MetaAction[] | undefined) {
+  return new Map((actions || []).map((item) => [item.action_type || "", Number(item.value || 0)]));
+}
+
 function resultCount(channel: Channel, actions: MetaAction[] | undefined) {
-  const byType = new Map((actions || []).map((item) => [item.action_type || "", Number(item.value || 0)]));
+  const byType = actionMap(actions);
   for (const actionType of RESULT_ACTION_PRIORITY[channel]) {
     if (byType.has(actionType)) return { value: Number(byType.get(actionType) || 0), actionType };
   }
   return { value: 0, actionType: null as string | null };
+}
+
+function genericResultCount(actions: MetaAction[] | undefined) {
+  const byType = actionMap(actions);
+  for (const actionType of GENERIC_RESULT_ACTION_PRIORITY) {
+    if (byType.has(actionType)) return Number(byType.get(actionType) || 0);
+  }
+  return 0;
 }
 
 async function metaGraphAll<T>(path: string, params: Record<string, string>) {
@@ -80,6 +104,14 @@ function quoteSheet(title: string) {
   return `'${title.replace(/'/g, "''")}'`;
 }
 
+function channelLabel(channel: Channel | null) {
+  if (channel === "direct") return "Direct / Messenger";
+  if (channel === "leadform") return "Lead Form";
+  if (channel === "quiz") return "Quiz";
+  if (channel === "site") return "Site";
+  return "Unmapped";
+}
+
 export async function syncMetaReporting(input: { accountId: string; spreadsheetId: string; since: string; until: string }) {
   await applyReportFormulas(input.spreadsheetId);
 
@@ -96,16 +128,33 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
   const unmapped = new Set<string>();
   const mappedCampaigns = new Set<string>();
   const resultActionTypes = new Map<string, number>();
+  const campaignRows: CampaignPerformanceRow[] = [];
   let mappedSpend = 0;
   let mappedLeads = 0;
 
   for (const insight of insights) {
     const name = insight.campaign_name || "(unnamed campaign)";
     const channel = mapCampaignToChannel(name);
-    if (!channel) { unmapped.add(name); continue; }
-    const result = resultCount(channel, insight.actions);
-    const leads = result.value;
     const spend = Number(insight.spend || 0);
+    const mappedResult = channel ? resultCount(channel, insight.actions) : null;
+    const detailResults = mappedResult ? mappedResult.value : genericResultCount(insight.actions);
+
+    campaignRows.push({
+      date: insight.date_start,
+      campaignId: insight.campaign_id || name,
+      campaignName: name,
+      channel: channelLabel(channel),
+      spend,
+      results: detailResults,
+    });
+
+    if (!channel) {
+      unmapped.add(name);
+      continue;
+    }
+
+    const result = mappedResult || { value: 0, actionType: null };
+    const leads = result.value;
     if (result.actionType) resultActionTypes.set(result.actionType, (resultActionTypes.get(result.actionType) || 0) + 1);
     mappedCampaigns.add(name);
     mappedSpend += spend;
@@ -139,6 +188,7 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
 
   await googleValuesBatchUpdate(input.spreadsheetId, data);
   await applyReportFormulas(input.spreadsheetId);
+  const campaignDetail = await syncCampaignPerformanceSheets(input.spreadsheetId, campaignRows);
 
   return {
     insightRows: insights.length,
@@ -148,6 +198,7 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
     mappedSpend: Number(mappedSpend.toFixed(2)),
     mappedLeads,
     cellsWritten: data.length,
+    campaignDetail,
     since: input.since,
     until: input.until,
   };
