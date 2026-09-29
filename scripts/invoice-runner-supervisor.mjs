@@ -1,4 +1,17 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+
+const localEnvPath = path.resolve('.env.invoice-agent');
+if (existsSync(localEnvPath)) {
+  try {
+    process.loadEnvFile(localEnvPath);
+    console.log(`Invoice supervisor loaded env from ${localEnvPath}`);
+  } catch (error) {
+    console.error(`Invoice supervisor failed to load ${localEnvPath}:`, error);
+    process.exit(1);
+  }
+}
 
 const maxCrashes = Math.max(1, Number(process.env.INVOICE_MAX_CRASHES_PER_RUN || 3));
 const maxMinutes = Math.max(1, Number(process.env.INVOICE_MAX_RUNTIME_MINUTES || 10));
