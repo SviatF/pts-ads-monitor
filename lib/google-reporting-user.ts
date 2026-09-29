@@ -1,24 +1,9 @@
 import { ensureProjectReportLifecycle, createProjectReport as createWithServiceAccount, REPORTING_GOALS } from "@/lib/google-reporting";
 import { getGoogleUserAccessToken, hasGoogleUserOAuth } from "@/lib/google-oauth";
 import { applyReportFormulas } from "@/lib/report-formulas";
+import { parseIsoDate, periodForDate } from "@/lib/report-periods";
 
 export { REPORTING_GOALS };
-
-function parseIsoDate(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day));
-}
-
-function endOfMonth(date: Date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
-}
-
-function weekEndForDate(date: Date) {
-  const day = date.getUTCDate();
-  const startDay = day <= 7 ? 1 : day <= 14 ? 8 : day <= 21 ? 15 : day <= 28 ? 22 : 29;
-  const endDay = Math.min(startDay + 6, endOfMonth(date).getUTCDate());
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), endDay));
-}
 
 function goalLabel(goalKey: string, customGoal?: string) {
   const preset = REPORTING_GOALS.find((goal) => goal.key === goalKey) || REPORTING_GOALS[0];
@@ -75,11 +60,12 @@ export async function createProjectReport(input: {
   await applyReportFormulas(copied.id);
 
   const start = parseIsoDate(input.startDate);
+  const period = periodForDate(start);
   return {
     fileId: copied.id,
     url: copied.webViewLink || `https://docs.google.com/spreadsheets/d/${copied.id}/edit`,
     goalLabel: goalLabel(input.goalKey, input.customGoal),
     startDate: input.startDate,
-    endDate: weekEndForDate(start).toISOString().slice(0, 10),
+    endDate: period.end.toISOString().slice(0, 10),
   };
 }
