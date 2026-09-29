@@ -8,7 +8,7 @@ import {
   setInvoiceSetupSession,
   upsertInvoiceSubscription,
 } from "@/lib/invoice-store";
-import { sendTelegramToChat } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
 
 export const dynamic = "force-dynamic";
 
@@ -63,7 +63,9 @@ export async function POST(request: NextRequest) {
       await sendTelegramToChat(chatId, "ℹ️ У цій групі немає активних invoice subscriptions.\n\nДля підключення: /start_invoices");
       return NextResponse.json({ ok: true });
     }
-    const rows = subscriptions.map((s) => `• <b>${s.account_name}</b> — <code>${s.meta_account_id}</code>\n  з ${s.start_date}`).join("\n");
+    const rows = subscriptions
+      .map((s) => `• <b>${escapeTelegramHtml(s.account_name)}</b> — <code>${escapeTelegramHtml(s.meta_account_id)}</code>\n  з ${escapeTelegramHtml(s.start_date)}`)
+      .join("\n");
     await sendTelegramToChat(chatId, `🧾 <b>Invoice Monitor активний</b>\n\n${rows}`);
     return NextResponse.json({ ok: true });
   }
@@ -81,7 +83,7 @@ export async function POST(request: NextRequest) {
     const accounts = await getBusinessAccounts();
     const account = accounts.find((item) => normalizeAccountId(item.id) === accountId);
     if (!account) {
-      await sendTelegramToChat(chatId, `❌ Кабінет <code>${accountId}</code> не знайдений серед доступних цьому monitor-у Meta accounts.`);
+      await sendTelegramToChat(chatId, `❌ Кабінет <code>${escapeTelegramHtml(accountId)}</code> не знайдений серед доступних цьому monitor-у Meta accounts.`);
       return NextResponse.json({ ok: true });
     }
 
@@ -96,7 +98,7 @@ export async function POST(request: NextRequest) {
 
     await sendTelegramToChat(
       chatId,
-      `✅ Кабінет знайдено\n\n<b>${account.name}</b>\n<code>${accountId}</code>${account.currency ? `\nCurrency: <b>${account.currency}</b>` : ""}\n\n📅 З якої дати почати витягувати інвойси?\nНаприклад: <code>01.09.2026</code>`
+      `✅ Кабінет знайдено\n\n<b>${escapeTelegramHtml(account.name)}</b>\n<code>${escapeTelegramHtml(accountId)}</code>${account.currency ? `\nCurrency: <b>${escapeTelegramHtml(account.currency)}</b>` : ""}\n\n📅 З якої дати почати витягувати інвойси?\nНаприклад: <code>01.09.2026</code>`
     );
     return NextResponse.json({ ok: true });
   }
@@ -119,7 +121,7 @@ export async function POST(request: NextRequest) {
 
   await sendTelegramToChat(
     chatId,
-    `✅ <b>Invoice Monitor activated</b>\n\nAccount: <b>${session.account_name}</b>\nID: <code>${session.meta_account_id}</code>\nStart date: <b>${startDate}</b>\n\nНові PDF-інвойси для цього кабінету будуть надсилатися саме в цю групу.`
+    `✅ <b>Invoice Monitor activated</b>\n\nAccount: <b>${escapeTelegramHtml(session.account_name)}</b>\nID: <code>${escapeTelegramHtml(session.meta_account_id)}</code>\nStart date: <b>${escapeTelegramHtml(startDate)}</b>\n\nНові PDF-інвойси для цього кабінету будуть надсилатися саме в цю групу.`
   );
 
   return NextResponse.json({ ok: true });
