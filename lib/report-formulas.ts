@@ -1,5 +1,6 @@
 import { getGoogleUserAccessToken } from "@/lib/google-oauth";
-import { PTS_REPORT_TEMPLATE } from "@/lib/report-template";
+import { PTS_REPORT_TEMPLATE, dailyBlocksForDays } from "@/lib/report-template";
+import { periodLengthFromTitle } from "@/lib/report-periods";
 
 type SheetMeta = { properties: { title: string; hidden?: boolean } };
 type ValueUpdate = { range: string; values: Array<Array<string | number>> };
@@ -42,9 +43,6 @@ async function valuesBatchUpdate(spreadsheetId: string, data: ValueUpdate[]) {
   );
 }
 
-// PTS master uses a Ukrainian/European spreadsheet locale, therefore
-// Google Sheets formula function arguments must be separated with semicolons.
-// Using commas causes #ERROR! / "Formula parse error" in copied reports.
 function derivedFormulas(row: number) {
   return {
     D: `=IFERROR(1-C${row}/B${row};0)`,
@@ -60,8 +58,7 @@ function derivedFormulas(row: number) {
 
 function pushDerived(data: ValueUpdate[], sheetTitle: string, row: number) {
   const sheet = quoteSheet(sheetTitle);
-  const formulas = derivedFormulas(row);
-  for (const [column, formula] of Object.entries(formulas)) {
+  for (const [column, formula] of Object.entries(derivedFormulas(row))) {
     data.push({ range: `${sheet}!${column}${row}`, values: [[formula]] });
   }
 }
@@ -69,10 +66,7 @@ function pushDerived(data: ValueUpdate[], sheetTitle: string, row: number) {
 function pushGroup(data: ValueUpdate[], sheetTitle: string, groupRow: number, childStart: number, childEnd: number) {
   const sheet = quoteSheet(sheetTitle);
   for (const column of ADDITIVE_COLUMNS) {
-    data.push({
-      range: `${sheet}!${column}${groupRow}`,
-      values: [[`=SUM(${column}${childStart}:${column}${childEnd})`]],
-    });
+    data.push({ range: `${sheet}!${column}${groupRow}`, values: [[`=SUM(${column}${childStart}:${column}${childEnd})`]] });
   }
   pushDerived(data, sheetTitle, groupRow);
 }
@@ -80,10 +74,7 @@ function pushGroup(data: ValueUpdate[], sheetTitle: string, groupRow: number, ch
 function pushTotal(data: ValueUpdate[], sheetTitle: string, row: number, groupRows: number[]) {
   const sheet = quoteSheet(sheetTitle);
   for (const column of ADDITIVE_COLUMNS) {
-    data.push({
-      range: `${sheet}!${column}${row}`,
-      values: [[`=SUM(${groupRows.map((groupRow) => `${column}${groupRow}`).join(";")})`]],
-    });
+    data.push({ range: `${sheet}!${column}${row}`, values: [[`=SUM(${groupRows.map((groupRow) => `${column}${groupRow}`).join(";")})`]] });
   }
   pushDerived(data, sheetTitle, row);
 }
@@ -94,29 +85,20 @@ function addDailyBlockFormulas(data: ValueUpdate[], sheetTitle: string, dataStar
 
   for (const offset of detailOffsets) {
     const row = dataStartRow + offset;
-    // C is derived because managers only enter G/H/J/L/M/O. B/E come from ad platforms.
     data.push({ range: `${sheet}!C${row}`, values: [[`=MAX(B${row}-H${row};0)`]] });
     pushDerived(data, sheetTitle, row);
   }
 
   for (const group of GROUPS) {
-    pushGroup(
-      data,
-      sheetTitle,
-      dataStartRow + group.rowOffset,
-      dataStartRow + group.childStartOffset,
-      dataStartRow + group.childEndOffset,
-    );
+    pushGroup(data, sheetTitle, dataStartRow + group.rowOffset, dataStartRow + group.childStartOffset, dataStartRow + group.childEndOffset);
   }
 
-  const totalRow = dataStartRow + TOTAL_OFFSET;
-  pushTotal(data, sheetTitle, totalRow, GROUPS.map((group) => dataStartRow + group.rowOffset));
+  pushTotal(data, sheetTitle, dataStartRow + TOTAL_OFFSET, GROUPS.map((group) => dataStartRow + group.rowOffset));
 }
 
-function addWeeklyFormulas(data: ValueUpdate[], sheetTitle: string) {
+function addWeeklyFormulas(data: ValueUpdate[], sheetTitle: string, dailyStarts: number[]) {
   const sheet = quoteSheet(sheetTitle);
   const weeklyStart = PTS_REPORT_TEMPLATE.weekly.dataStartRow;
-  const dailyStarts = PTS_REPORT_TEMPLATE.daily.blocks.map((block) => block.dataStartRow);
 
   for (let offset = 0; offset <= TOTAL_OFFSET; offset += 1) {
     const row = weeklyStart + offset;
@@ -143,10 +125,10 @@ export async function applyReportFormulas(spreadsheetId: string) {
 
   const data: ValueUpdate[] = [];
   for (const title of weeklySheets) {
-    for (const block of PTS_REPORT_TEMPLATE.daily.blocks) {
-      addDailyBlockFormulas(data, title, block.dataStartRow);
-    }
-    addWeeklyFormulas(data, title);
+    const days = periodLengthFromTitle(title) || 7;
+    const blocks = dailyBlocksForDays(days);
+    for (const block of blocks) addDailyBlockFormulas(data, title, block.dataStartRow);
+    addWeeklyFormulas(data, title, blocks.map((block) => block.dataStartRow));
   }
 
   await valuesBatchUpdate(spreadsheetId, data);
