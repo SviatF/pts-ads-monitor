@@ -49,15 +49,21 @@ function metaToken() {
 }
 
 function normalizeCampaignName(name: string) {
-  return name.toLowerCase().replace(/[\s_\-]+/g, " ").trim();
+  return name.toLowerCase().replace(/[\s_\-:|]+/g, " ").trim();
 }
 
 export function mapCampaignToChannel(name: string): Channel | null {
   const normalized = normalizeCampaignName(name);
-  if (/\blead\s*form\b|\bleadform\b/i.test(normalized)) return "leadform";
+
+  // Specific intent words win over generic lead/leads words.
+  if (/\bdirect\b|\bmessenger\b|\bmessages?\b|\bdm\b/i.test(normalized)) return "direct";
   if (/\bquiz\b/i.test(normalized)) return "quiz";
-  if (/\bdirect\b|\bmessenger\b/i.test(normalized)) return "direct";
-  if (/\bsite\b|\bwebsite\b|\bweb\b/i.test(normalized)) return "site";
+  if (/\bsite\b|\bwebsite\b|\bweb\s*site\b|\bweb\b/i.test(normalized)) return "site";
+  if (/\bleads?\s*form\b|\bleadform\b|\binstant\s*form\b/i.test(normalized)) return "leadform";
+
+  // Legacy PTS campaigns are sometimes named simply "Leads: ..." while the Result is Lead (Form).
+  if (/\bleads?\b/i.test(normalized)) return "leadform";
+
   return null;
 }
 
@@ -153,6 +159,8 @@ export async function syncMetaReporting(input: {
   const aggregate = new Map<string, { leads: number; spend: number }>();
   const unmapped = new Set<string>();
   const mappedCampaigns = new Set<string>();
+  let mappedSpend = 0;
+  let mappedLeads = 0;
 
   for (const insight of insights) {
     const name = insight.campaign_name || "(unnamed campaign)";
@@ -161,11 +169,17 @@ export async function syncMetaReporting(input: {
       unmapped.add(name);
       continue;
     }
+
+    const leads = resultCount(insight.actions);
+    const spend = Number(insight.spend || 0);
     mappedCampaigns.add(name);
+    mappedSpend += spend;
+    mappedLeads += leads;
+
     const key = `${insight.date_start}|${channel}`;
     const current = aggregate.get(key) || { leads: 0, spend: 0 };
-    current.leads += resultCount(insight.actions);
-    current.spend += Number(insight.spend || 0);
+    current.leads += leads;
+    current.spend += spend;
     aggregate.set(key, current);
   }
 
@@ -195,6 +209,8 @@ export async function syncMetaReporting(input: {
     insightRows: insights.length,
     mappedCampaigns: [...mappedCampaigns],
     unmappedCampaigns: [...unmapped],
+    mappedSpend: Number(mappedSpend.toFixed(2)),
+    mappedLeads,
     cellsWritten: data.length,
     since: input.since,
     until: input.until,
