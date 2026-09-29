@@ -4,6 +4,14 @@
   "main": "./custom-worker.ts",
   "compatibility_date": "2026-08-18",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "GOOGLE_REPORTS_FOLDER_ID": "1JyQf2_G8bNSpB90pojlk57eCtrnT8Uyq",
+    "GOOGLE_SERVICE_ACCOUNT_EMAIL": "service-ads-monitor@ads-monitor-510115.iam.gserviceaccount.com",
+    "META_BUSINESS_ID": "4129086910648334",
+    "META_GRAPH_VERSION": "v26.0",
+    "SUPABASE_URL": "https://gqtwjnvgwrnxjdnwzifb.supabase.co",
+    "TELEGRAM_CHAT_ID": "-1003995184617"
+  },
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
