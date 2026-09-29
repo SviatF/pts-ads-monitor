@@ -1,0 +1,1 @@
+Configure the invoice runner with the application base URL, a shared runner key, and a persisted Meta browser storage-state file. Keep the storage-state file outside the repository and rotate it if the Meta session expires.
