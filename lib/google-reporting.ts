@@ -308,10 +308,13 @@ async function duplicateFromMaster(spreadsheetId: string, masterSheetId: number,
 
 function templateDataRanges(sheetTitle: string) {
   const sheet = quoteSheet(sheetTitle);
+  // Column A is structural template data: source/funnel names such as Meta Ads,
+  // Direct / Messenger, Lead Form, Quiz, Site, Google Ads and SMM. Never clear it.
+  // Only metric/input columns B:R should be reset in newly duplicated sheets.
   return [
-    `${sheet}!A${PTS_REPORT_TEMPLATE.weekly.dataStartRow}:R${PTS_REPORT_TEMPLATE.weekly.dataEndRow}`,
+    `${sheet}!B${PTS_REPORT_TEMPLATE.weekly.dataStartRow}:R${PTS_REPORT_TEMPLATE.weekly.dataEndRow}`,
     ...PTS_REPORT_TEMPLATE.daily.blocks.map(
-      (block) => `${sheet}!A${block.dataStartRow}:R${block.dataEndRow}`,
+      (block) => `${sheet}!B${block.dataStartRow}:R${block.dataEndRow}`,
     ),
   ];
 }
