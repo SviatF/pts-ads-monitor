@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const PUBLIC_API_PREFIXES = [
+  "/api/monitor",
+  "/api/telegram",
+  "/api/reporting/morning",
+  "/api/reporting/lifecycle",
+];
+
 export function middleware(request: NextRequest) {
-  if (request.nextUrl.pathname.startsWith("/api/monitor")) return NextResponse.next();
+  if (PUBLIC_API_PREFIXES.some((prefix) => request.nextUrl.pathname.startsWith(prefix))) {
+    return NextResponse.next();
+  }
 
   const password = process.env.DASHBOARD_PASSWORD;
   if (!password) return NextResponse.next();
