@@ -21,6 +21,12 @@ function previousMonthRange() {
   return { since: first.toISOString().slice(0, 10), until: last.toISOString().slice(0, 10) };
 }
 
+function normalizeTelegramUsername(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+}
+
 export default async function ReportingSetupPage({ params, searchParams }: { params: Promise<{ accountId: string }>; searchParams: Promise<{ error?: string; message?: string }> }) {
   const { accountId } = await params;
   const query = await searchParams;
@@ -41,10 +47,34 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
     const goalKey = String(formData.get("goalKey") || "sale");
     const customGoal = String(formData.get("customGoal") || "").trim();
     const startDate = String(formData.get("startDate") || todayIso());
+    const targetologistTelegram = normalizeTelegramUsername(String(formData.get("targetologistTelegram") || ""));
+    const performanceMonitoringEnabled = String(formData.get("performanceMonitoringEnabled") || "") === "1";
+    const creativeWasteMinSpend = Number(formData.get("creativeWasteMinSpend") || 15);
+    const creativeWasteCplMultiplier = Number(formData.get("creativeWasteCplMultiplier") || 1.5);
+    const cplWarningPct = Number(formData.get("cplWarningPct") || 25);
+    const cplCriticalPct = Number(formData.get("cplCriticalPct") || 40);
     const replacing = String(formData.get("replaceExisting") || "") === "1";
     try {
       const report = await createProjectReport({ projectName, goalKey, customGoal, startDate });
-      await upsertReportingConfig({ meta_account_id: currentAccountId, project_name: projectName, goal_key: goalKey, goal_label: report.goalLabel, currency: null, timezone: "Europe/Kyiv", report_start_date: report.startDate, report_end_date: report.endDate, report_file_id: report.fileId, report_url: report.url, status: "configured" });
+      await upsertReportingConfig({
+        meta_account_id: currentAccountId,
+        project_name: projectName,
+        goal_key: goalKey,
+        goal_label: report.goalLabel,
+        currency: existing?.currency || null,
+        timezone: "Europe/Kyiv",
+        report_start_date: report.startDate,
+        report_end_date: report.endDate,
+        report_file_id: report.fileId,
+        report_url: report.url,
+        status: "configured",
+        targetologist_telegram: targetologistTelegram || null,
+        performance_monitoring_enabled: performanceMonitoringEnabled,
+        creative_waste_min_spend: Number.isFinite(creativeWasteMinSpend) ? creativeWasteMinSpend : 15,
+        creative_waste_cpl_multiplier: Number.isFinite(creativeWasteCplMultiplier) ? creativeWasteCplMultiplier : 1.5,
+        cpl_warning_pct: Number.isFinite(cplWarningPct) ? cplWarningPct : 25,
+        cpl_critical_pct: Number.isFinite(cplCriticalPct) ? cplCriticalPct : 40,
+      });
       revalidatePath("/");
       revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
     } catch (error) {
@@ -52,7 +82,7 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
     }
     const message = replacing
       ? "Звіт перестворено. Нову Google-таблицю підключено до проєкту; стара таблиця залишилась без змін як backup."
-      : "Звіт створено. Формули активовані.";
+      : "Звіт створено. Формули та Performance Control активовані.";
     redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent(message)}`);
   }
 
@@ -69,7 +99,7 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
       await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: since });
       const result = await syncMetaReporting({ accountId: currentAccountId, spreadsheetId: config.report_file_id, since, until });
       const unmappedPreview = result.unmappedCampaigns.slice(0, 5).join("; ");
-      successMessage = `Meta sync ${since} → ${until}: ${result.insightRows} campaign-day rows; ${result.mappedCampaigns.length} mapped campaigns; leads=${result.mappedLeads}; spend=$${result.mappedSpend}; ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
+      successMessage = `Meta sync ${since} → ${until}: ${result.insightRows} campaign-day rows; ${result.mappedCampaigns.length} mapped campaigns; results=${result.mappedLeads}; spend=$${result.mappedSpend}; ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
       revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
     } catch (error) {
       redirect(`/reporting/${encodeURIComponent(currentAccountId)}?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
@@ -80,10 +110,10 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
   return (
     <main className="shell narrowShell">
       <Link href="/" className="backLink">← До кабінетів</Link>
-      <div className="setupHero"><div className="eyebrow">PTS Reporting · Project Setup</div><h1>Налаштувати звітність</h1><p className="subtitle">Одна Google Таблиця = один проєкт. Meta автоматично заповнює лише B (ліди/результати) та E (витрати), менеджери працюють з G/H/J/L/M/O, решта KPI та weekly totals рахуються формулами.</p></div>
+      <div className="setupHero"><div className="eyebrow">PTS Reporting · Project Setup</div><h1>Налаштувати звітність</h1><p className="subtitle">Одна Google Таблиця = один проєкт. Meta автоматично заповнює C (Результат) та E (Витрати), менеджери вручну вносять B/G/H/J/L/M/O, решта KPI та weekly totals рахуються формулами.</p></div>
       <section className="panel setupPanel">
         <div className="panelHead"><div><strong>{account.name}</strong><div className="eyebrow setupAccountId">{account.meta_account_id}</div></div><span className={`statusPill ${existing ? "ok" : "warn"}`}>{existing ? "Reporting configured" : "Needs setup"}</span></div>
-        {existing ? <div className="configuredBox"><div><div className="eyebrow">Поточний звіт</div><h2>{existing.project_name}</h2><p className="subtitle">Кінцева ціль: <strong>{existing.goal_label}</strong></p></div><a className="runButton linkButton" href={existing.report_url} target="_blank" rel="noreferrer">Відкрити Google Sheet</a></div> : null}
+        {existing ? <div className="configuredBox"><div><div className="eyebrow">Поточний звіт</div><h2>{existing.project_name}</h2><p className="subtitle">Кінцева ціль: <strong>{existing.goal_label}</strong>{existing.targetologist_telegram ? <> · Таргетолог: <strong>{existing.targetologist_telegram}</strong></> : null}</p></div><a className="runButton linkButton" href={existing.report_url} target="_blank" rel="noreferrer">Відкрити Google Sheet</a></div> : null}
         {query.error ? <div className="formError">{query.error}</div> : null}
         {query.message ? <div className="empty good">{query.message}</div> : null}
         {existing ? (
@@ -97,9 +127,24 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
         ) : null}
         <form action={createReport} className="setupForm">
           <label><span>Назва проєкту</span><input name="projectName" defaultValue={existing?.project_name || account.name} required /></label>
-          <label><span>Кінцева ціль запусків</span><select name="goalKey" defaultValue={existing?.goal_key || "sale"}>{REPORTING_GOALS.map((goal) => <option key={goal.key} value={goal.key}>{goal.label}</option>)}</select><small>Фінальна ціль автоматично змінюється в weekly, daily та monthly блоках: наприклад Продаж → Реєстрації.</small></label>
+          <label><span>Telegram таргетолога</span><input name="targetologistTelegram" defaultValue={existing?.targetologist_telegram || ""} placeholder="@username" required /><small>Цього спеціаліста бот тегатиме у performance-alerts для цього кабінету.</small></label>
+          <label><span>Кінцева ціль запусків</span><select name="goalKey" defaultValue={existing?.goal_key || "sale"}>{REPORTING_GOALS.map((goal) => <option key={goal.key} value={goal.key}>{goal.label}</option>)}</select><small>Фінальна ціль автоматично змінюється в weekly, daily та monthly блоках.</small></label>
           <label><span>Інша ціль, якщо обрано «Інше»</span><input name="customGoal" placeholder="Наприклад: Депозит, Договір, Оплата" /></label>
-          <label><span>З якої дати вести звітність проєкту</span><input type="date" name="startDate" defaultValue={existing?.report_start_date || todayIso()} required /><small>Фіксовані 4 періоди місяця: 01–07, 08–15, 16–22, 23–кінець місяця. О 07:00 першого дня нового періоду система автоматично створює новий аркуш; 1 числа спочатку закриває минулий місяць місячним аркушем.</small></label>
+          <label><span>З якої дати вести звітність проєкту</span><input type="date" name="startDate" defaultValue={existing?.report_start_date || todayIso()} required /><small>Фіксовані 4 періоди місяця: 01–07, 08–15, 16–22, 23–кінець місяця.</small></label>
+
+          <div className="configuredBox">
+            <div>
+              <div className="eyebrow">PTS Performance Control</div>
+              <h2>Автоматичний контроль оптимізації</h2>
+              <p className="subtitle">Алерти йдуть тільки в Telegram-групи, які привʼязані командою <code>/reporting META_ACCOUNT_ID</code>, і тегають закріпленого таргетолога.</p>
+            </div>
+          </div>
+          <input type="hidden" name="performanceMonitoringEnabled" value="1" />
+          <label><span>Мін. spend креативу без результату</span><input type="number" name="creativeWasteMinSpend" min="1" step="1" defaultValue={existing?.creative_waste_min_spend ?? 15} /><small>До цього spend система не робить висновок, що креатив потребує оптимізації.</small></label>
+          <label><span>Коефіцієнт Creative Waste відносно CPL інших креативів</span><input type="number" name="creativeWasteCplMultiplier" min="1" step="0.1" defaultValue={existing?.creative_waste_cpl_multiplier ?? 1.5} /><small>Наприклад 1.5×: якщо інші креативи вже дають ліди, а проблемний спалив ≥1.5 середнього CPL без результату — пушимо.</small></label>
+          <label><span>CPL warning, % росту</span><input type="number" name="cplWarningPct" min="5" step="5" defaultValue={existing?.cpl_warning_pct ?? 25} /></label>
+          <label><span>CPL critical, % росту</span><input type="number" name="cplCriticalPct" min="10" step="5" defaultValue={existing?.cpl_critical_pct ?? 40} /></label>
+
           {existing ? <input type="hidden" name="replaceExisting" value="1" /> : null}
           {existing ? <div className="dangerZone"><div><strong>Перестворити звіт</strong><p>Буде створена нова Google-таблиця з актуального master-шаблону та підключена до цього проєкту. Поточна таблиця не видаляється і залишиться як backup.</p></div><button className="runButton dangerAction" type="submit">Перестворити звіт</button></div> : <div className="setupActions"><button className="runButton primaryAction" type="submit">Створити Google звіт</button><Link href="/" className="secondaryButton">Скасувати</Link></div>}
         </form>
