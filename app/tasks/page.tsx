@@ -3,13 +3,6 @@ import { getPerformanceDashboardData, healthForAlerts } from "@/lib/performance-
 
 export const dynamic = "force-dynamic";
 
-function healthLabel(value: ReturnType<typeof healthForAlerts>) {
-  if (value === "critical") return ["🔴", "Critical"];
-  if (value === "action") return ["🟠", "Action Required"];
-  if (value === "watch") return ["🟡", "Watch"];
-  return ["🟢", "Healthy"];
-}
-
 function age(value: string) {
   const ms = Date.now() - new Date(value).getTime();
   const hours = Math.max(0, Math.floor(ms / 3600000));
@@ -18,14 +11,24 @@ function age(value: string) {
   return `${Math.floor(hours / 24)} дн`;
 }
 
+function healthMeta(value: ReturnType<typeof healthForAlerts>) {
+  if (value === "critical") return { label: "Critical", cls: "healthCritical", icon: "●" };
+  if (value === "action") return { label: "Action Required", cls: "healthAction", icon: "●" };
+  if (value === "watch") return { label: "Watch", cls: "healthWatch", icon: "●" };
+  return { label: "Healthy", cls: "healthHealthy", icon: "●" };
+}
+
 export default async function TasksDashboard() {
   const { alerts, configs, projectNames, owners } = await getPerformanceDashboardData();
+  const enabledConfigs = configs.filter((c) => c.enabled);
   const open = alerts.filter((a) => !a.resolved_at && ["critical", "action_required"].includes(a.severity));
   const inProgress = open.filter((a) => a.acknowledged_at);
   const waiting = open.filter((a) => !a.acknowledged_at);
+  const critical = open.filter((a) => a.severity === "critical");
+  const warnings = alerts.filter((a) => !a.resolved_at && a.severity === "warning");
+  const overdue = waiting.filter((a) => Date.now() - new Date(a.last_seen_at).getTime() >= 4 * 3600000);
   const todayKey = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const doneToday = alerts.filter((a) => a.resolved_at && new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(a.resolved_at)) === todayKey);
-  const overdue = waiting.filter((a) => Date.now() - new Date(a.last_seen_at).getTime() >= 4 * 3600000);
 
   const byAccount = new Map<string, typeof alerts>();
   for (const alert of alerts.filter((a) => !a.resolved_at)) {
@@ -34,55 +37,168 @@ export default async function TasksDashboard() {
     byAccount.set(alert.meta_account_id, rows);
   }
 
+  const projectCards = enabledConfigs.map((config) => {
+    const rows = byAccount.get(config.meta_account_id) || [];
+    const health = healthForAlerts(rows);
+    return {
+      config,
+      rows,
+      health,
+      meta: healthMeta(health),
+      open: rows.filter((a) => ["critical", "action_required"].includes(a.severity)).length,
+      critical: rows.filter((a) => a.severity === "critical").length,
+      warning: rows.filter((a) => a.severity === "warning").length,
+    };
+  }).sort((a, b) => {
+    const weight = { critical: 4, action: 3, watch: 2, healthy: 1 } as const;
+    return weight[b.health] - weight[a.health];
+  });
+
+  const needsAttention = open.slice().sort((a, b) => {
+    if (a.severity !== b.severity) return a.severity === "critical" ? -1 : 1;
+    if (Boolean(a.acknowledged_at) !== Boolean(b.acknowledged_at)) return a.acknowledged_at ? 1 : -1;
+    return new Date(a.last_seen_at).getTime() - new Date(b.last_seen_at).getTime();
+  });
+
+  const healthyProjects = projectCards.filter((p) => p.health === "healthy").length;
+  const attentionProjects = projectCards.filter((p) => p.health === "action" || p.health === "critical").length;
+  const watchProjects = projectCards.filter((p) => p.health === "watch").length;
+
+  const timeline = alerts.slice(0, 10);
+
   return <main className="adminShell">
     <aside className="sidebar">
       <div className="brandBlock"><div className="brandMark">//</div><div><strong>PTS</strong><span>COOPERATION</span></div></div>
       <nav className="sideNav">
         <Link href="/" className="sideNavItem"><span>⌂</span>Overview</Link>
-        <Link href="/tasks" className="sideNavItem active"><span>✓</span>Tasks</Link>
+        <Link href="/tasks" className="sideNavItem active"><span>⚡</span>Performance OS</Link>
+        <Link href="/#accounts" className="sideNavItem"><span>◉</span>Accounts</Link>
+        <Link href="/#reporting" className="sideNavItem"><span>▥</span>Reporting</Link>
         <Link href="/diagnostics" className="sideNavItem"><span>⌁</span>Diagnostics</Link>
+        <Link href="/#accounts" className="sideNavItem"><span>▣</span>Billing</Link>
+        <Link href="/#accounts" className="sideNavItem"><span>➤</span>Telegram</Link>
       </nav>
+      <div className="automationCard">
+        <div className="automationHead"><span>Performance OS</span><b>LIVE</b></div>
+        <div className="automationMeta">Tasks · Health · Team control</div>
+        <div className="pulseBars" aria-hidden="true">{Array.from({ length: 18 }).map((_, i) => <i key={i} style={{ height: `${8 + ((i * 9) % 22)}px` }} />)}</div>
+        <div className="automationFoot"><span>Monitoring</span><span className="ok">● online</span></div>
+      </div>
     </aside>
+
     <section className="workspace">
-      <header className="topBar"><div className="searchGhost">Performance OS · Tasks & Health</div><div className="systemOnline"><span className="dot ok"/>live</div></header>
-      <div className="shell dashboardShell">
-        <div className="topRow heroRow"><div><div className="eyebrow purpleText">PTS Performance OS</div><h1>Tasks <span className="violetGradient">Control</span></h1><p className="subtitle">Один екран для відкритих задач, статусу проєктів і історії дій по alerts.</p></div></div>
+      <header className="topBar">
+        <div className="searchGhost">⚡ Performance OS · Command Center</div>
+        <div className="systemOnline"><span className="dot ok"/>Live data from Performance Control</div>
+      </header>
 
-        <section className="grid dashboardGrid">
-          <div className="card metricCard redCard"><div className="metricIcon">!</div><div><div className="eyebrow">Open</div><div className="metric bad">{open.length}</div><div className="metricHint">Actionable зараз</div></div></div>
-          <div className="card metricCard amberCard"><div className="metricIcon">▶</div><div><div className="eyebrow">In progress</div><div className="metric warn">{inProgress.length}</div><div className="metricHint">Взято в роботу</div></div></div>
-          <div className="card metricCard greenCard"><div className="metricIcon">✓</div><div><div className="eyebrow">Done today</div><div className="metric ok">{doneToday.length}</div><div className="metricHint">Закрито сьогодні</div></div></div>
-          <div className="card metricCard redCard"><div className="metricIcon">⌛</div><div><div className="eyebrow">Overdue</div><div className="metric bad">{overdue.length}</div><div className="metricHint">4+ год без ACK</div></div></div>
-          <div className="card metricCard violetCard"><div className="metricIcon">◉</div><div><div className="eyebrow">Projects</div><div className="metric">{configs.filter((c) => c.enabled).length}</div><div className="metricHint">Під контролем</div></div></div>
+      <div className="shell performanceShell">
+        <section className="performanceHero">
+          <div>
+            <div className="eyebrow purpleText">PTS Performance OS · Live Control</div>
+            <h1>Performance <span className="violetGradient">Command Center</span></h1>
+            <p className="subtitle">Тут тільки те, що потрібно для керування командою: де горить, хто вже взяв задачу, які проєкти здорові та що відбулось останнім.</p>
+          </div>
+          <div className="heroStatusCluster">
+            <div className="heroStatusDot" />
+            <div><strong>{critical.length ? `${critical.length} critical зараз` : "Критичних проблем немає"}</strong><span>{waiting.length} очікують реакції · {inProgress.length} у роботі</span></div>
+          </div>
         </section>
 
-        <section className="panel accountsPanel">
-          <div className="panelHead"><div><strong>Project Health</strong><div className="eyebrow panelSub">Стан формується з відкритих alerts</div></div></div>
-          <div className="tableWrap"><table><thead><tr><th>Проєкт</th><th>Таргетолог</th><th>Health</th><th>Open</th><th>Critical</th></tr></thead><tbody>
-            {configs.filter((c) => c.enabled).map((config) => {
-              const rows = byAccount.get(config.meta_account_id) || [];
-              const health = healthForAlerts(rows);
-              const [icon, label] = healthLabel(health);
-              return <tr key={config.meta_account_id}><td><strong>{config.project_name}</strong></td><td>{config.targetologist_telegram || "—"}</td><td>{icon} {label}</td><td>{rows.filter((a) => ["critical","action_required"].includes(a.severity)).length}</td><td className="bad">{rows.filter((a) => a.severity === "critical").length}</td></tr>;
-            })}
-          </tbody></table></div>
+        <section className="commandMetrics">
+          <div className="commandMetric danger"><span className="commandMetricIcon">!</span><div><small>ПОТРЕБУЮТЬ УВАГИ</small><strong>{open.length}</strong><p>{waiting.length} ще без ACK</p></div></div>
+          <div className="commandMetric progress"><span className="commandMetricIcon">↗</span><div><small>В РОБОТІ</small><strong>{inProgress.length}</strong><p>таргетологи вже взяли</p></div></div>
+          <div className="commandMetric success"><span className="commandMetricIcon">✓</span><div><small>ЗАКРИТО СЬОГОДНІ</small><strong>{doneToday.length}</strong><p>готових задач</p></div></div>
+          <div className="commandMetric warning"><span className="commandMetricIcon">⌛</span><div><small>OVERDUE</small><strong>{overdue.length}</strong><p>4+ год без ACK</p></div></div>
         </section>
 
-        <section className="panel accountsPanel">
-          <div className="panelHead"><div><strong>Open Tasks</strong><div className="eyebrow panelSub">Critical та Action Required</div></div><span className="statusPill warn">{open.length} open</span></div>
-          <div className="tableWrap"><table><thead><tr><th>Alert</th><th>Проєкт</th><th>Відповідальний</th><th>Проблема</th><th>Status</th><th>Age</th></tr></thead><tbody>
-            {open.length ? open.map((a) => <tr key={a.id}><td><code>#{a.id}</code></td><td><strong>{projectNames.get(a.meta_account_id) || a.meta_account_id}</strong></td><td>{owners.get(a.meta_account_id) || "—"}</td><td>{a.severity === "critical" ? "🔴" : "🟠"} {a.title}</td><td>{a.acknowledged_at ? <span className="ok">In progress</span> : <span className="warn">Waiting ACK</span>}</td><td>{age(a.last_seen_at)}</td></tr>) : <tr><td colSpan={6} className="ok">Активних actionable задач немає.</td></tr>}
-          </tbody></table></div>
+        <section className="performanceOverviewGrid">
+          <div className="commandPanel attentionPanel">
+            <div className="commandPanelHead">
+              <div><span className="eyebrow purpleText">PRIORITY QUEUE</span><h2>Що потребує уваги зараз</h2></div>
+              <span className="livePill"><i/>LIVE</span>
+            </div>
+            <div className="priorityList">
+              {needsAttention.length ? needsAttention.slice(0, 8).map((a) => {
+                const project = projectNames.get(a.meta_account_id) || a.meta_account_id;
+                const owner = owners.get(a.meta_account_id) || "Не призначено";
+                return <div className={`priorityItem ${a.severity === "critical" ? "criticalTask" : "actionTask"}`} key={a.id}>
+                  <div className="priorityRail" />
+                  <div className="priorityMain">
+                    <div className="priorityTop"><strong>{project}</strong><span className={a.severity === "critical" ? "bad" : "warn"}>{a.severity === "critical" ? "CRITICAL" : "ACTION"}</span></div>
+                    <div className="priorityTitle">{a.title}</div>
+                    <div className="priorityMeta"><span>{owner}</span><span>Alert #{a.id}</span><span>{age(a.last_seen_at)}</span></div>
+                  </div>
+                  <div className={`taskState ${a.acknowledged_at ? "stateProgress" : "stateWaiting"}`}>{a.acknowledged_at ? "In progress" : "Waiting ACK"}</div>
+                </div>;
+              }) : <div className="zeroState"><span>✓</span><strong>Черга порожня</strong><p>Немає Critical або Action Required задач.</p></div>}
+            </div>
+          </div>
+
+          <div className="commandPanel pulsePanel">
+            <div className="commandPanelHead"><div><span className="eyebrow purpleText">NETWORK HEALTH</span><h2>Стан усіх проєктів</h2></div></div>
+            <div className="healthDonutWrap">
+              <div className="healthDonut"><div><strong>{enabledConfigs.length}</strong><span>projects</span></div></div>
+              <div className="healthLegend">
+                <div><i className="legendHealthy"/><span>Healthy</span><strong>{healthyProjects}</strong></div>
+                <div><i className="legendWatch"/><span>Watch</span><strong>{watchProjects}</strong></div>
+                <div><i className="legendAction"/><span>Action</span><strong>{attentionProjects}</strong></div>
+                <div><i className="legendCritical"/><span>Critical</span><strong>{projectCards.filter((p) => p.health === "critical").length}</strong></div>
+              </div>
+            </div>
+            <div className="miniSignalGrid">
+              <div><span>Warnings</span><strong>{warnings.length}</strong></div>
+              <div><span>Critical tasks</span><strong className="bad">{critical.length}</strong></div>
+              <div><span>Waiting ACK</span><strong className="warn">{waiting.length}</strong></div>
+              <div><span>Done today</span><strong className="ok">{doneToday.length}</strong></div>
+            </div>
+          </div>
         </section>
 
-        <section className="panel accountsPanel">
-          <div className="panelHead"><div><strong>Recent Timeline</strong><div className="eyebrow panelSub">Останні alerts, ACK, notes та закриття</div></div></div>
-          <div className="tableWrap"><table><thead><tr><th>Alert</th><th>Проєкт</th><th>Події</th></tr></thead><tbody>
-            {alerts.slice(0,30).map((a) => {
-              const notes = Array.isArray(a.details?.notes) ? a.details.notes as Array<{note?:string;at?:string}> : [];
-              return <tr key={a.id}><td><code>#{a.id}</code><div className="eyebrow">{a.title}</div></td><td>{projectNames.get(a.meta_account_id) || a.meta_account_id}</td><td><div>Створено: {new Date(a.first_seen_at).toLocaleString("uk-UA")}</div>{a.acknowledged_at ? <div className="ok">ACK: {new Date(a.acknowledged_at).toLocaleString("uk-UA")}</div> : null}{notes.slice(-2).map((n,i) => <div key={i}>📝 {n.note || "note"}</div>)}{a.resolved_at ? <div className="ok">✓ Закрито: {new Date(a.resolved_at).toLocaleString("uk-UA")}</div> : null}</td></tr>;
-            })}
-          </tbody></table></div>
+        <section className="commandPanel projectsMatrixPanel">
+          <div className="commandPanelHead">
+            <div><span className="eyebrow purpleText">PROJECT MATRIX</span><h2>Health map</h2><p>Спочатку показуємо те, де є проблема. Healthy — нижче.</p></div>
+            <span className="statusPill violetPill">{enabledConfigs.length} monitored</span>
+          </div>
+          <div className="projectHealthGrid">
+            {projectCards.map(({ config, meta, open: openCount, critical: criticalCount, warning }) => <div className={`projectHealthCard ${meta.cls}`} key={config.meta_account_id}>
+              <div className="projectCardTop"><div><span className="projectHealthDot">{meta.icon}</span><strong>{config.project_name}</strong></div><span className="healthBadge">{meta.label}</span></div>
+              <div className="projectOwner">{config.targetologist_telegram || "Без відповідального"}</div>
+              <div className="projectSignals">
+                <div><span>Open</span><strong>{openCount}</strong></div>
+                <div><span>Critical</span><strong>{criticalCount}</strong></div>
+                <div><span>Watch</span><strong>{warning}</strong></div>
+              </div>
+            </div>)}
+          </div>
+        </section>
+
+        <section className="performanceBottomGrid">
+          <div className="commandPanel">
+            <div className="commandPanelHead"><div><span className="eyebrow purpleText">TEAM FLOW</span><h2>Що відбувається з задачами</h2></div></div>
+            <div className="flowStages">
+              <div className="flowStage"><span>01</span><strong>Detected</strong><b>{open.length}</b><small>бот знайшов проблему</small></div>
+              <div className="flowArrow">→</div>
+              <div className="flowStage"><span>02</span><strong>ACK</strong><b>{inProgress.length}</b><small>взято в роботу</small></div>
+              <div className="flowArrow">→</div>
+              <div className="flowStage"><span>03</span><strong>Done</strong><b>{doneToday.length}</b><small>закрито сьогодні</small></div>
+            </div>
+          </div>
+
+          <div className="commandPanel timelinePanel">
+            <div className="commandPanelHead"><div><span className="eyebrow purpleText">ACTIVITY STREAM</span><h2>Останні події</h2></div></div>
+            <div className="timelineStream">
+              {timeline.map((a) => {
+                const notes = Array.isArray(a.details?.notes) ? a.details.notes as Array<{note?:string;at?:string}> : [];
+                const lastNote = notes.at(-1);
+                const state = a.resolved_at ? "Закрито" : a.acknowledged_at ? "В роботі" : "Створено";
+                return <div className="timelineEvent" key={a.id}>
+                  <span className={`timelineDot ${a.resolved_at ? "done" : a.severity === "critical" ? "critical" : "active"}`}/>
+                  <div><div className="timelineTop"><strong>{projectNames.get(a.meta_account_id) || a.meta_account_id}</strong><span>#{a.id}</span></div><p>{a.title}</p>{lastNote?.note ? <small>📝 {lastNote.note}</small> : <small>{state} · {age(a.first_seen_at)}</small>}</div>
+                </div>;
+              })}
+            </div>
+          </div>
         </section>
       </div>
     </section>
