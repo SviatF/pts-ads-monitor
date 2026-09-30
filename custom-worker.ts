@@ -43,10 +43,14 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     hydrateProcessEnv(env);
     const tasks: Promise<unknown>[] = [callInternal("/api/monitor", env, ctx)];
-
-    // Cron runs every 10 minutes. At 07:00 Europe/Kyiv run the complete reporting
-    // morning workflow: lifecycle (monthly/new week) -> previous-day Meta sync -> Telegram status.
     const { hour, minute } = kyivClock();
+
+    // Performance Control runs once per hour. Alert dedupe/cooldown is handled in DB.
+    if (minute < 10) {
+      tasks.push(callInternal("/api/performance/check", env, ctx));
+    }
+
+    // At 07:00 Europe/Kyiv run lifecycle -> previous-day Meta sync -> Telegram status.
     if (hour === 7 && minute < 10) {
       tasks.push(callInternal("/api/reporting/morning", env, ctx));
     }
