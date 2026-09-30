@@ -1,4 +1,5 @@
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+import { upsertPerformanceMonitoringConfig } from "@/lib/performance-config-store";
 
 export type ReportingConfig = {
   meta_account_id: string;
@@ -86,6 +87,21 @@ export async function upsertReportingConfig(row: ReportingConfigInput): Promise<
     body: JSON.stringify(payload),
   });
   const saved = rows[0];
+
+  if (saved) {
+    await upsertPerformanceMonitoringConfig({
+      meta_account_id: saved.meta_account_id,
+      project_name: saved.project_name,
+      targetologist_telegram: saved.targetologist_telegram,
+      enabled: saved.performance_monitoring_enabled,
+      source: "reporting",
+      creative_waste_min_spend: Number(saved.creative_waste_min_spend || 15),
+      creative_waste_cpl_multiplier: Number(saved.creative_waste_cpl_multiplier || 1.5),
+      cpl_warning_pct: Number(saved.cpl_warning_pct || 25),
+      cpl_critical_pct: Number(saved.cpl_critical_pct || 40),
+    });
+  }
+
   const adminChatId = process.env.TELEGRAM_CHAT_ID;
   if (adminChatId && saved && (!existing || existing.report_file_id !== saved.report_file_id)) {
     try {
