@@ -5,6 +5,9 @@ import { periodLengthFromTitle } from "@/lib/report-periods";
 type SheetMeta = { properties: { title: string; hidden?: boolean } };
 type ValueUpdate = { range: string; values: Array<Array<string | number>> };
 
+// B = manager-entered actual/general leads.
+// C = Meta Ads result/conversions imported automatically.
+// Both are additive in group, weekly and monthly rollups.
 const ADDITIVE_COLUMNS = ["B", "C", "E", "G", "H", "J", "L", "M", "O"] as const;
 const GROUPS = [
   { rowOffset: 0, childStartOffset: 1, childEndOffset: 4 },
@@ -45,8 +48,11 @@ async function valuesBatchUpdate(spreadsheetId: string, data: ValueUpdate[]) {
 
 function derivedFormulas(row: number) {
   return {
-    D: `=IFERROR(1-C${row}/B${row};0)`,
-    F: `=IFERROR(E${row}/C${row};0)`,
+    // Difference between ad-platform Result (C) and manager-confirmed leads (B).
+    // Example: Meta result 100, manager leads 90 => 10% difference.
+    D: `=IFERROR(1-B${row}/C${row};0)`,
+    // Cost per manager-confirmed/handed-off lead.
+    F: `=IFERROR(E${row}/B${row};0)`,
     I: `=IFERROR(H${row}/B${row};0)`,
     K: `=IFERROR(J${row}/G${row};0)`,
     N: `=IFERROR(L${row}/J${row};0)`,
@@ -81,11 +87,11 @@ function pushTotal(data: ValueUpdate[], sheetTitle: string, row: number, groupRo
 
 function addDailyBlockFormulas(data: ValueUpdate[], sheetTitle: string, dataStartRow: number) {
   const detailOffsets = [1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 14, 15];
-  const sheet = quoteSheet(sheetTitle);
 
+  // IMPORTANT: B, G, H, J, L, M and O are manager-input cells on detail rows.
+  // C and E are written by Meta sync. We never generate/overwrite B or C here.
   for (const offset of detailOffsets) {
     const row = dataStartRow + offset;
-    data.push({ range: `${sheet}!C${row}`, values: [[`=MAX(B${row}-H${row};0)`]] });
     pushDerived(data, sheetTitle, row);
   }
 
@@ -110,6 +116,16 @@ function addWeeklyFormulas(data: ValueUpdate[], sheetTitle: string, dailyStarts:
   }
 }
 
+function pushSchemaHeaders(data: ValueUpdate[], sheetTitle: string, days: number) {
+  const sheet = quoteSheet(sheetTitle);
+  const rows = [PTS_REPORT_TEMPLATE.weekly.headerRow, ...dailyBlocksForDays(days).map((block) => block.headerRow)];
+  for (const row of rows) {
+    data.push({ range: `${sheet}!B${row}`, values: [["Загальна\nкількість лідів"]] });
+    data.push({ range: `${sheet}!C${row}`, values: [["Результат"]] });
+    data.push({ range: `${sheet}!D${row}`, values: [["% різниці між\nрезультатом та\nлідами"]] });
+  }
+}
+
 function isWeeklySheet(title: string) {
   return /^\d{2}\.\d{2}[–-]\d{2}\.\d{2}$/.test(title);
 }
@@ -127,6 +143,7 @@ export async function applyReportFormulas(spreadsheetId: string) {
   for (const title of weeklySheets) {
     const days = periodLengthFromTitle(title) || 7;
     const blocks = dailyBlocksForDays(days);
+    pushSchemaHeaders(data, title, days);
     for (const block of blocks) addDailyBlockFormulas(data, title, block.dataStartRow);
     addWeeklyFormulas(data, title, blocks.map((block) => block.dataStartRow));
   }
