@@ -64,3 +64,27 @@ export async function resolvePerformanceAlert(id: number, by: string) {
   });
   return rows[0] || null;
 }
+
+export async function addPerformanceAlertNote(id: number, by: string, note: string) {
+  const existing = await request<PerformanceAlert[]>(`performance_alerts?id=eq.${id}&limit=1`);
+  const alert = existing[0];
+  if (!alert) return null;
+
+  const trimmed = note.trim();
+  if (!trimmed) return null;
+
+  const currentNotes = Array.isArray(alert.details?.notes) ? alert.details.notes : [];
+  const notes = [
+    ...currentNotes,
+    { by, note: trimmed, at: new Date().toISOString() },
+  ].slice(-20);
+
+  const rows = await request<PerformanceAlert[]>(`performance_alerts?id=eq.${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      details: { ...alert.details, notes },
+      updated_at: new Date().toISOString(),
+    }),
+  });
+  return rows[0] || null;
+}
