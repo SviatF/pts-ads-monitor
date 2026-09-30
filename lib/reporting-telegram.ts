@@ -8,6 +8,7 @@ import {
 } from "@/lib/reporting-telegram-store";
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
 import { acknowledgePerformanceAlert, resolvePerformanceAlert } from "@/lib/performance-alert-store";
+import { runPerformanceMonitor } from "@/lib/performance-monitor";
 
 function commandArgument(text: string, command: string) {
   const match = new RegExp(`^/${command}(?:@\\w+)?(?:\\s+(.+))?$`, "i").exec(text.trim());
@@ -44,6 +45,39 @@ export async function notifyAdminReportCreated(input: { projectName: string; acc
 }
 
 export async function handleReportingTelegramCommand(chatId: string, text: string) {
+  if (text === "/performance_demo" || text.startsWith("/performance_demo@")) {
+    const targetChatId = process.env.PERFORMANCE_TELEGRAM_CHAT_ID;
+    if (!targetChatId) {
+      await sendTelegramToChat(chatId, "❌ <code>PERFORMANCE_TELEGRAM_CHAT_ID</code> не налаштований у Cloudflare.");
+      return true;
+    }
+    await sendTelegramToChat(
+      targetChatId,
+      `🧪 <b>PTS PERFORMANCE CONTROL — TEST</b>\n\n✅ Внутрішній performance-чат підключений правильно.\n\nЦе тестове повідомлення. Реальні alerts по CPL, creative waste, spend без results, просадці лідів, якості та ескалаціях будуть приходити тільки сюди.`,
+    );
+    await sendTelegramToChat(chatId, `✅ Test message відправлено в PERFORMANCE_TELEGRAM_CHAT_ID: <code>${escapeTelegramHtml(targetChatId)}</code>`);
+    return true;
+  }
+
+  if (text === "/performance_test" || text.startsWith("/performance_test@")) {
+    const targetChatId = process.env.PERFORMANCE_TELEGRAM_CHAT_ID;
+    if (!targetChatId) {
+      await sendTelegramToChat(chatId, "❌ <code>PERFORMANCE_TELEGRAM_CHAT_ID</code> не налаштований у Cloudflare.");
+      return true;
+    }
+    await sendTelegramToChat(chatId, "⏳ Запускаю реальну перевірку всіх performance-enabled кабінетів...");
+    try {
+      const result = await runPerformanceMonitor();
+      await sendTelegramToChat(
+        chatId,
+        `✅ <b>Performance test завершено</b>\n\nКабінетів перевірено: <b>${result.projects}</b>\nAlerts знайдено: <b>${result.alerts}</b>\nПовідомлень відправлено: <b>${result.notifications}</b>${result.errors.length ? `\nПомилки: <b>${result.errors.length}</b>\n<code>${escapeTelegramHtml(result.errors.slice(0, 5).join(" | "))}</code>` : "\nПомилок: <b>0</b>"}`,
+      );
+    } catch (error) {
+      await sendTelegramToChat(chatId, `❌ Performance test failed: <code>${escapeTelegramHtml(error instanceof Error ? error.message : String(error))}</code>`);
+    }
+    return true;
+  }
+
   const ackArg = commandArgument(text, "perf_ack");
   if (ackArg !== null) {
     const id = Number(ackArg);
@@ -82,7 +116,7 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
     await upsertReportingTelegramSubscription({ telegram_chat_id: chatId, meta_account_id: config.meta_account_id, account_name: config.project_name });
     await sendTelegramToChat(
       chatId,
-      `✅ <b>PTS Reporting + Performance Control підключено до цієї групи</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nКабінет: <code>${escapeTelegramHtml(config.meta_account_id)}</code>${config.targetologist_telegram ? `\nТаргетолог: <b>${escapeTelegramHtml(config.targetologist_telegram)}</b>` : "\n⚠️ Таргетолог ще не вказаний у налаштуваннях проєкту."}\n\nЩоранку о <b>07:00 Europe/Kyiv</b> бот синхронізує попередній день. Performance Control перевіряє кабінет протягом дня й пушить optimization alerts.\nПідтвердження alert: <code>/perf_ack ID</code> · закриття: <code>/perf_done ID</code>\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
+      `✅ <b>PTS Reporting підключено до цієї групи</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nКабінет: <code>${escapeTelegramHtml(config.meta_account_id)}</code>${config.targetologist_telegram ? `\nТаргетолог: <b>${escapeTelegramHtml(config.targetologist_telegram)}</b>` : ""}\n\nЩоранку о <b>07:00 Europe/Kyiv</b> бот синхронізує попередній день. Performance alerts для внутрішньої команди йдуть окремо в PERFORMANCE_TELEGRAM_CHAT_ID.\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
     );
     return true;
   }
@@ -98,7 +132,7 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
       const config = await getReportingConfig(row.meta_account_id);
       rows.push(`• <b>${escapeTelegramHtml(row.account_name)}</b> — <code>${escapeTelegramHtml(row.meta_account_id)}</code>${config?.targetologist_telegram ? ` — ${escapeTelegramHtml(config.targetologist_telegram)}` : ""}`);
     }
-    await sendTelegramToChat(chatId, `📊 <b>Reporting + Performance subscriptions</b>\n\n${rows.join("\n")}`);
+    await sendTelegramToChat(chatId, `📊 <b>Reporting subscriptions</b>\n\n${rows.join("\n")}`);
     return true;
   }
 
@@ -111,7 +145,7 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
     } else {
       await disableReportingTelegramSubscription(chatId);
     }
-    await sendTelegramToChat(chatId, "⏹ <b>Reporting + Performance notifications вимкнено</b> для вибраного кабінету/цієї групи.");
+    await sendTelegramToChat(chatId, "⏹ <b>Reporting notifications вимкнено</b> для вибраного кабінету/цієї групи.");
     return true;
   }
 
