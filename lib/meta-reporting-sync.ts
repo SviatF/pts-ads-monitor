@@ -181,7 +181,8 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
     for (const channel of Object.keys(CHANNEL_ROW_OFFSET) as Channel[]) {
       const row = block.dataStartRow + CHANNEL_ROW_OFFSET[channel];
       const values = aggregate.get(`${iso}|${channel}`) || { leads: 0, spend: 0 };
-      data.push({ range: `${sheet}!B${row}`, values: [[values.leads]] });
+      // C = Meta Result (automatic). B is reserved strictly for manager-entered general leads.
+      data.push({ range: `${sheet}!C${row}`, values: [[values.leads]] });
       data.push({ range: `${sheet}!E${row}`, values: [[Number(values.spend.toFixed(2))]] });
     }
   }
