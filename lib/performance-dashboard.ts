@@ -9,6 +9,7 @@ export type DashboardAlert = {
   details: Record<string, unknown>;
   first_seen_at: string;
   last_seen_at: string;
+  last_notified_at?: string | null;
   acknowledged_at: string | null;
   acknowledged_by: string | null;
   resolved_at: string | null;
@@ -52,4 +53,26 @@ export async function getPerformanceDashboardData() {
   const projectNames = new Map(configs.map((c) => [c.meta_account_id, c.project_name]));
   const owners = new Map(configs.map((c) => [c.meta_account_id, c.targetologist_telegram || ""]));
   return { alerts, configs, projectNames, owners };
+}
+
+export async function getPerformanceAlertById(id: number) {
+  const [rows, configs] = await Promise.all([
+    request<DashboardAlert[]>(`performance_alerts?select=*&id=eq.${id}&limit=1`),
+    listPerformanceMonitoringConfigs(),
+  ]);
+  const alert = rows[0];
+  if (!alert || SUPPRESSED.has(alert.alert_type)) return null;
+  const config = configs.find((item) => item.meta_account_id === alert.meta_account_id) || null;
+  return { alert, config };
+}
+
+export async function getPerformanceProjectData(metaAccountId: string, days = 30) {
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const [alertsRaw, configs] = await Promise.all([
+    request<DashboardAlert[]>(`performance_alerts?select=*&meta_account_id=eq.${encodeURIComponent(metaAccountId)}&first_seen_at=gte.${encodeURIComponent(since)}&order=first_seen_at.desc&limit=1000`),
+    listPerformanceMonitoringConfigs(),
+  ]);
+  const alerts = alertsRaw.filter((a) => !SUPPRESSED.has(a.alert_type));
+  const config = configs.find((item) => item.meta_account_id === metaAccountId) || null;
+  return { alerts, config };
 }
