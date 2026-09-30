@@ -48,9 +48,17 @@ function stripAckLine(message: string) {
     .replace(/\nПідтвердьте:[^\n]*<code>\/perf_ack\s+\d+<\/code>[^\n]*/gi, "");
 }
 
+function isSuppressedPerformanceMessage(message: string) {
+  return /CAMPAIGN WASTE|Campaign потребує оптимізації/i.test(message);
+}
+
 export async function sendPerformanceMessage(message: string) {
   const chatId = performanceChatId();
   if (!chatId) throw new Error("PERFORMANCE_TELEGRAM_CHAT_ID is not configured");
+
+  // Campaign-level CPL comparison is intentionally disabled: campaigns can target
+  // different funnels/audiences and are not directly comparable enough for a reliable alert.
+  if (isSuppressedPerformanceMessage(message)) return 0;
 
   const alertId = alertIdFromMessage(message);
   if (alertId) {
