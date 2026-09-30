@@ -37,13 +37,15 @@ function requiresAck(item: AlertRow) {
   return item.severity === "action_required" || item.severity === "critical";
 }
 
+const DISABLED_ALERT_TYPES = new Set(["CAMPAIGN_WASTE", "A_LEAD_DROP"]);
+
 export async function sendPerformanceBrief(kind: "morning" | "evening") {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const [alertsRaw, configs] = await Promise.all([
     request<AlertRow[]>(`performance_alerts?select=id,meta_account_id,alert_type,severity,title,first_seen_at,last_seen_at,last_notified_at,acknowledged_at,resolved_at&or=(last_seen_at.gte.${encodeURIComponent(since)},resolved_at.gte.${encodeURIComponent(since)})&order=last_seen_at.desc&limit=200`),
     listPerformanceMonitoringConfigs(),
   ]);
-  const alerts = alertsRaw.filter((item) => item.alert_type !== "CAMPAIGN_WASTE");
+  const alerts = alertsRaw.filter((item) => !DISABLED_ALERT_TYPES.has(item.alert_type));
   const activeConfigs = configs.filter((item) => item.enabled);
   const names = new Map(activeConfigs.map((item) => [item.meta_account_id, item.project_name]));
   const open = alerts.filter((item) => !item.resolved_at && ["warning", "action_required", "critical"].includes(item.severity));
