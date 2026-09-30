@@ -1,10 +1,11 @@
-export const PTS_REPORT_TEMPLATE_VERSION = "pts-performance-v2-four-periods";
+export const PTS_REPORT_TEMPLATE_VERSION = "pts-performance-v3-manager-leads-meta-result";
 
 // Source-of-truth workbook: Example-Zvit | Performance.
 // IMPORTANT: reports are created only by copying the master Google Sheet.
 // We never rebuild formatting/styles from code and never edit the master itself.
 // Google Drive copy preserves fills, fonts, borders, merged cells, row heights,
 // column widths, number formats, alignment and all other sheet formatting.
+// Data contract: B = manager-entered general leads, C = Meta Result, E = Meta spend.
 export const PTS_REPORT_TEMPLATE = {
   range: "A1:R168",
   titleCell: "A1",
