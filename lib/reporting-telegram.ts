@@ -7,9 +7,10 @@ import {
   upsertReportingTelegramSubscription,
 } from "@/lib/reporting-telegram-store";
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
-import { acknowledgePerformanceAlert, resolvePerformanceAlert } from "@/lib/performance-alert-store";
+import { acknowledgePerformanceAlert, resolvePerformanceAlert, addPerformanceAlertNote } from "@/lib/performance-alert-store";
 import { runPerformanceMonitor } from "@/lib/performance-monitor";
 import { sendPerformanceBrief } from "@/lib/performance-brief";
+import { sendDailyPerformanceTasks, sendManagementEscalations, sendRecurringProblemReport, sendWeeklyTeamScorecard } from "@/lib/performance-operations";
 
 function commandArgument(text: string, command: string) {
   const match = new RegExp(`^/${command}(?:@\\w+)?(?:\\s+(.+))?$`, "i").exec(text.trim());
@@ -56,14 +57,14 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
       targetChatId,
       `🧪 <b>PTS PERFORMANCE CONTROL — TEST</b>\n\n✅ Внутрішній performance-чат підключений правильно.\n\nЦе тестове повідомлення. Реальні alerts по CPL, creative waste, spend без results, просадці лідів, якості та ескалаціях будуть приходити тільки сюди.`,
     );
-    await sendTelegramToChat(chatId, `✅ Test message відправлено в PERFORMANCE_TELEGRAM_CHAT_ID: <code>${escapeTelegramHtml(targetChatId)}</code>`);
+    await sendTelegramToChat(chatId, "✅ Test message відправлено у внутрішній performance-чат.");
     return true;
   }
 
   if (text === "/performance_test" || text.startsWith("/performance_test@")) {
     const targetChatId = process.env.PERFORMANCE_TELEGRAM_CHAT_ID;
     if (!targetChatId) {
-      await sendTelegramToChat(chatId, "❌ <code>PERFORMANCE_TELEGRAM_CHAT_ID</code> не налаштований у Cloudflare.");
+      await sendTelegramToChat(chatId, "❌ Внутрішній performance-чат ще не налаштований.");
       return true;
     }
     await sendTelegramToChat(chatId, "⏳ Запускаю реальну перевірку всіх performance-enabled кабінетів...");
@@ -99,6 +100,36 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
     return true;
   }
 
+  if (text === "/tasks_today" || text.startsWith("/tasks_today@")) {
+    try {
+      const result = await sendDailyPerformanceTasks();
+      await sendTelegramToChat(chatId, `✅ Daily Tasks сформовано. Задач: <b>${result.tasks}</b>, таргетологів: <b>${result.targetologists}</b>.`);
+    } catch (error) {
+      await sendTelegramToChat(chatId, `❌ Tasks failed: <code>${escapeTelegramHtml(error instanceof Error ? error.message : String(error))}</code>`);
+    }
+    return true;
+  }
+
+  if (text === "/management_check" || text.startsWith("/management_check@")) {
+    try {
+      const result = await sendManagementEscalations();
+      await sendTelegramToChat(chatId, `✅ Management escalation check завершено. Відправлено: <b>${result.sent}</b>.`);
+    } catch (error) {
+      await sendTelegramToChat(chatId, `❌ Management check failed: <code>${escapeTelegramHtml(error instanceof Error ? error.message : String(error))}</code>`);
+    }
+    return true;
+  }
+
+  if (text === "/management_weekly" || text.startsWith("/management_weekly@")) {
+    try {
+      const [scorecard, recurring] = await Promise.all([sendWeeklyTeamScorecard(), sendRecurringProblemReport()]);
+      await sendTelegramToChat(chatId, `✅ Weekly Management Control сформовано. Спеціалістів: <b>${scorecard.targetologists}</b>, recurring alerts: <b>${recurring.sent}</b>.`);
+    } catch (error) {
+      await sendTelegramToChat(chatId, `❌ Weekly Management Control failed: <code>${escapeTelegramHtml(error instanceof Error ? error.message : String(error))}</code>`);
+    }
+    return true;
+  }
+
   const ackArg = commandArgument(text, "perf_ack");
   if (ackArg !== null) {
     const id = Number(ackArg);
@@ -107,7 +138,21 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
       return true;
     }
     const alert = await acknowledgePerformanceAlert(id, `telegram:${chatId}`);
-    await sendTelegramToChat(chatId, alert ? `✅ <b>Alert #${id} взято у роботу.</b> Повторна ескалація по ньому зупинена.` : `❌ Alert #${id} не знайдений.`);
+    await sendTelegramToChat(chatId, alert ? `✅ <b>Alert #${id} взято у роботу.</b> Повторна ескалація по ньому зупинена.` : `ℹ️ Alert #${id} не знайдений або для нього не потрібне підтвердження.`);
+    return true;
+  }
+
+  const noteArg = commandArgument(text, "perf_note");
+  if (noteArg !== null) {
+    const match = /^(\d+)\s+(.+)$/.exec(noteArg);
+    if (!match) {
+      await sendTelegramToChat(chatId, "❌ Формат: <code>/perf_note ALERT_ID що саме зробили</code>");
+      return true;
+    }
+    const id = Number(match[1]);
+    const note = match[2].trim();
+    const alert = await addPerformanceAlertNote(id, `telegram:${chatId}`, note);
+    await sendTelegramToChat(chatId, alert ? `📝 <b>Нотатку до Alert #${id} збережено.</b>\n${escapeTelegramHtml(note)}` : `❌ Alert #${id} не знайдений.`);
     return true;
   }
 
