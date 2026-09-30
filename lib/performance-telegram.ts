@@ -22,11 +22,11 @@ function alertIdFromMessage(message: string) {
   return match ? Number(match[1]) : null;
 }
 
-async function alertSeverity(alertId: number) {
+async function alertMeta(alertId: number) {
   const cfg = supabaseConfig();
   if (!cfg) return null;
   try {
-    const response = await fetch(`${cfg.url}/rest/v1/performance_alerts?id=eq.${alertId}&select=severity&limit=1`, {
+    const response = await fetch(`${cfg.url}/rest/v1/performance_alerts?id=eq.${alertId}&select=severity,alert_type&limit=1`, {
       headers: {
         apikey: cfg.key,
         Authorization: `Bearer ${cfg.key}`,
@@ -35,8 +35,8 @@ async function alertSeverity(alertId: number) {
       cache: "no-store",
     });
     if (!response.ok) return null;
-    const rows = await response.json() as Array<{ severity?: string }>;
-    return rows[0]?.severity || null;
+    const rows = await response.json() as Array<{ severity?: string; alert_type?: string }>;
+    return rows[0] || null;
   } catch {
     return null;
   }
@@ -48,22 +48,25 @@ function stripAckLine(message: string) {
     .replace(/\nПідтвердьте:[^\n]*<code>\/perf_ack\s+\d+<\/code>[^\n]*/gi, "");
 }
 
+const DISABLED_ALERT_TYPES = new Set(["CAMPAIGN_WASTE", "A_LEAD_DROP"]);
+
 function isSuppressedPerformanceMessage(message: string) {
-  return /CAMPAIGN WASTE|Campaign потребує оптимізації/i.test(message);
+  return /CAMPAIGN WASTE|Campaign потребує оптимізації|A-LEAD RATE ПРОСІВ/i.test(message);
 }
 
 export async function sendPerformanceMessage(message: string) {
   const chatId = performanceChatId();
   if (!chatId) throw new Error("PERFORMANCE_TELEGRAM_CHAT_ID is not configured");
 
-  // Campaign-level CPL comparison is intentionally disabled: campaigns can target
-  // different funnels/audiences and are not directly comparable enough for a reliable alert.
+  // These alerts are intentionally disabled because their comparison can be misleading
+  // without enough business context. Keep them out of the team chat even if legacy code creates one.
   if (isSuppressedPerformanceMessage(message)) return 0;
 
   const alertId = alertIdFromMessage(message);
   if (alertId) {
-    const severity = await alertSeverity(alertId);
-    const requiresAck = severity === "action_required" || severity === "critical";
+    const meta = await alertMeta(alertId);
+    if (meta?.alert_type && DISABLED_ALERT_TYPES.has(meta.alert_type)) return 0;
+    const requiresAck = meta?.severity === "action_required" || meta?.severity === "critical";
     if (!requiresAck) message = stripAckLine(message);
   }
 
