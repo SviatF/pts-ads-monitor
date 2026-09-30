@@ -55,6 +55,14 @@ export default {
       tasks.push(callInternal("/api/reporting/morning", env, ctx));
     }
 
+    // Internal team briefs: morning priorities + end-of-day accountability.
+    if (hour === 10 && minute < 10) {
+      tasks.push(callInternal("/api/performance/brief?kind=morning", env, ctx));
+    }
+    if (hour === 19 && minute < 10) {
+      tasks.push(callInternal("/api/performance/brief?kind=evening", env, ctx));
+    }
+
     ctx.waitUntil(Promise.allSettled(tasks).then((results) => {
       for (const result of results) {
         if (result.status === "rejected") console.error("Scheduled task failed", result.reason);
