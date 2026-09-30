@@ -64,7 +64,7 @@ export async function listReportingConfigs(): Promise<ReportingConfig[]> {
 }
 
 export async function getReportingConfig(metaAccountId: string): Promise<ReportingConfig | null> {
-  const rows = await request<ReportingConfig[]>(`reporting_configs?meta_account_id=eq.${encodeURIComponent(metaAccountId)}&limit=1`);
+  const rows = await request<ReportingConfig[]>(`reporting_configs?meta_account_id=eq.${encodeURIComponent(metaAccountId)}&status=eq.configured&limit=1`);
   return rows[0] || null;
 }
 
@@ -73,6 +73,7 @@ export async function upsertReportingConfig(row: ReportingConfigInput): Promise<
   const now = new Date().toISOString();
   const payload = {
     ...row,
+    status: "configured",
     targetologist_telegram: row.targetologist_telegram ?? existing?.targetologist_telegram ?? null,
     performance_monitoring_enabled: row.performance_monitoring_enabled ?? existing?.performance_monitoring_enabled ?? true,
     creative_waste_min_spend: row.creative_waste_min_spend ?? existing?.creative_waste_min_spend ?? 15,
