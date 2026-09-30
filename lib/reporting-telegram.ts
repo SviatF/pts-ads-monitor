@@ -9,6 +9,7 @@ import {
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
 import { acknowledgePerformanceAlert, resolvePerformanceAlert } from "@/lib/performance-alert-store";
 import { runPerformanceMonitor } from "@/lib/performance-monitor";
+import { sendPerformanceBrief } from "@/lib/performance-brief";
 
 function commandArgument(text: string, command: string) {
   const match = new RegExp(`^/${command}(?:@\\w+)?(?:\\s+(.+))?$`, "i").exec(text.trim());
@@ -74,6 +75,26 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
       );
     } catch (error) {
       await sendTelegramToChat(chatId, `❌ Performance test failed: <code>${escapeTelegramHtml(error instanceof Error ? error.message : String(error))}</code>`);
+    }
+    return true;
+  }
+
+  if (text === "/performance_brief" || text.startsWith("/performance_brief@")) {
+    try {
+      await sendPerformanceBrief("morning");
+      await sendTelegramToChat(chatId, "✅ Morning Performance Brief відправлено у внутрішній performance-чат.");
+    } catch (error) {
+      await sendTelegramToChat(chatId, `❌ Brief failed: <code>${escapeTelegramHtml(error instanceof Error ? error.message : String(error))}</code>`);
+    }
+    return true;
+  }
+
+  if (text === "/performance_brief_evening" || text.startsWith("/performance_brief_evening@")) {
+    try {
+      await sendPerformanceBrief("evening");
+      await sendTelegramToChat(chatId, "✅ End-of-day Performance Brief відправлено у внутрішній performance-чат.");
+    } catch (error) {
+      await sendTelegramToChat(chatId, `❌ Brief failed: <code>${escapeTelegramHtml(error instanceof Error ? error.message : String(error))}</code>`);
     }
     return true;
   }
