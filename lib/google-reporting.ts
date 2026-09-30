@@ -62,7 +62,7 @@ async function accessToken() {
   const key = await crypto.subtle.importKey("pkcs8", pemToArrayBuffer(privateKey), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
   const signature = await crypto.subtle.sign({ name: "RSASSA-PKCS1-v1_5" }, key, new TextEncoder().encode(unsigned));
   const assertion = `${unsigned}.${bytesToBase64Url(new Uint8Array(signature))}`;
-  const response = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth-type:jwt-bearer", assertion }) });
+  const response = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }) });
   if (!response.ok) throw new Error(`Google OAuth failed (${response.status}): ${await response.text()}`);
   const body = (await response.json()) as { access_token: string; expires_in: number };
   tokenCache = { token: body.access_token, expiresAt: Date.now() + body.expires_in * 1000 };
@@ -221,7 +221,6 @@ async function createMonthlySheet(input: { spreadsheetId: string; masterSheetId:
       data.push({ range: `${sheet}!${column}${row}`, values: [[column === "A" ? `=${quoteSheet(weeklyTitles[0])}!A${row}` : cellFormulaForMonthly(column, row, weeklyTitles)]] });
     }
   }
-  // Monthly sheet contains only the four completed weekly summaries, never daily data.
   PTS_REPORT_TEMPLATE.daily.blocks.forEach((block, index) => {
     const period = weeklyPeriods[index];
     if (!period) { data.push({ range: `${sheet}!A${block.dateRow}`, values: [[""]] }); return; }
