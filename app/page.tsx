@@ -2,6 +2,7 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { countRejectedAds, listStoredAccounts } from "@/lib/store";
 import { listReportingConfigs } from "@/lib/reporting-store";
+import { listPerformanceMonitoringConfigs } from "@/lib/performance-config-store";
 import { runMonitor } from "@/lib/run-monitor";
 
 export const dynamic = "force-dynamic";
@@ -21,24 +22,29 @@ async function runMonitorNow() {
 export default async function Dashboard() {
   let accounts = [] as Awaited<ReturnType<typeof listStoredAccounts>>;
   let reportingConfigs = [] as Awaited<ReturnType<typeof listReportingConfigs>>;
+  let monitoringConfigs = [] as Awaited<ReturnType<typeof listPerformanceMonitoringConfigs>>;
   let rejectedCount = 0;
   let error = "";
 
   try {
-    [accounts, rejectedCount, reportingConfigs] = await Promise.all([
+    [accounts, rejectedCount, reportingConfigs, monitoringConfigs] = await Promise.all([
       listStoredAccounts(),
       countRejectedAds(),
       listReportingConfigs(),
+      listPerformanceMonitoringConfigs(),
     ]);
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }
 
+  const configuredReporting = reportingConfigs.filter((item) => item.status === "configured");
   const active = accounts.filter((a) => a.status_kind === "active").length;
   const payment = accounts.filter((a) => a.status_kind === "payment").length;
   const problems = accounts.filter((a) => a.status_kind !== "active").length;
-  const reportingByAccount = new Map(reportingConfigs.map((config) => [config.meta_account_id, config]));
-  const needsReporting = accounts.filter((account) => !reportingByAccount.has(account.meta_account_id));
+  const reportingByAccount = new Map(configuredReporting.map((config) => [config.meta_account_id, config]));
+  const monitoringByAccount = new Map(monitoringConfigs.map((config) => [config.meta_account_id, config]));
+  const needsSetup = accounts.filter((account) => !reportingByAccount.has(account.meta_account_id) && !monitoringByAccount.has(account.meta_account_id));
+  const monitoringEnabled = monitoringConfigs.filter((item) => item.enabled).length;
 
   return (
     <main className="adminShell">
@@ -78,7 +84,7 @@ export default async function Dashboard() {
             <div>
               <div className="eyebrow purpleText">PTS Cooperation · Internal Tool</div>
               <h1>Ads Health <span className="violetGradient">Monitor</span></h1>
-              <p className="subtitle">Централізований health-check рекламних кабінетів Meta, rejected ads і PTS reporting. Новий кабінет автоматично потрапляє в чергу на налаштування звітності.</p>
+              <p className="subtitle">Для кожного Meta-кабінету окремо обираємо режим: тільки Performance Monitoring або повна PTS Reporting + Monitoring.</p>
             </div>
             <form action={runMonitorNow} className="runMonitorWrap">
               <button className="runButton neonPrimary" type="submit"><span>▶</span> Run monitor now</button>
@@ -90,28 +96,31 @@ export default async function Dashboard() {
             <div className="card metricCard violetCard"><div className="metricIcon">◉</div><div><div className="eyebrow">Accounts</div><div className="metric">{accounts.length}</div><div className="metricHint">Total Meta ad accounts</div></div></div>
             <div className="card metricCard greenCard"><div className="metricIcon">●</div><div><div className="eyebrow">Active</div><div className="metric ok">{active}</div><div className="metricHint">Actively monitored</div></div></div>
             <div className="card metricCard redCard"><div className="metricIcon">△</div><div><div className="eyebrow">Problems</div><div className="metric bad">{problems}</div><div className="metricHint">Need attention</div></div></div>
-            <div className="card metricCard amberCard"><div className="metricIcon">▣</div><div><div className="eyebrow">Payment states</div><div className="metric warn">{payment}</div><div className="metricHint">Payment issues</div></div></div>
-            <div className="card metricCard violetCard"><div className="metricIcon">▤</div><div><div className="eyebrow">Reporting setup</div><div className={`metric ${needsReporting.length ? "warn" : "ok"}`}>{reportingConfigs.length}/{accounts.length}</div><div className="metricHint">Accounts with reporting</div></div></div>
+            <div className="card metricCard amberCard"><div className="metricIcon">▣</div><div><div className="eyebrow">Performance</div><div className={`metric ${monitoringEnabled ? "ok" : "warn"}`}>{monitoringEnabled}</div><div className="metricHint">Accounts with Performance Control</div></div></div>
+            <div className="card metricCard violetCard"><div className="metricIcon">▤</div><div><div className="eyebrow">Reporting</div><div className="metric">{configuredReporting.length}</div><div className="metricHint">Accounts with PTS Google reporting</div></div></div>
           </section>
 
-          {needsReporting.length > 0 ? (
+          {needsSetup.length > 0 ? (
             <section className="panel newAccountsPanel">
               <div className="panelHead">
                 <div>
-                  <strong>Нові кабінети · потрібне налаштування звітності</strong>
-                  <div className="eyebrow panelSub">Monitor already detected them — створення Google Sheet займає один setup</div>
+                  <strong>Кабінети · оберіть потрібний режим</strong>
+                  <div className="eyebrow panelSub">Якщо клієнт уже має свою звітність — підключаємо тільки моніторинг. Якщо потрібна наша звітність — Reporting автоматично включить Performance Control.</div>
                 </div>
-                <span className="statusPill warn">{needsReporting.length} needs setup</span>
+                <span className="statusPill warn">{needsSetup.length} needs setup</span>
               </div>
               <div className="newAccountsGrid">
-                {needsReporting.map((account) => (
+                {needsSetup.map((account) => (
                   <div className="newAccountCard" key={account.meta_account_id}>
                     <div>
-                      <span className="newBadge">NEW</span>
+                      <span className="newBadge">SETUP</span>
                       <h3>{account.name}</h3>
                       <code>{account.meta_account_id}</code>
                     </div>
-                    <Link className="runButton linkButton" href={`/reporting/${encodeURIComponent(account.meta_account_id)}`}>Налаштувати звітність</Link>
+                    <div className="reportingActions">
+                      <Link className="runButton linkButton" href={`/monitoring/${encodeURIComponent(account.meta_account_id)}`}>Тільки моніторинг</Link>
+                      <Link className="runButton linkButton" href={`/reporting/${encodeURIComponent(account.meta_account_id)}`}>Звітність + моніторинг</Link>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -128,16 +137,23 @@ export default async function Dashboard() {
             ) : (
               <div className="tableWrap">
                 <table>
-                  <thead><tr><th>Account</th><th>ID</th><th>Status</th><th>Reporting</th><th>Last check</th></tr></thead>
+                  <thead><tr><th>Account</th><th>ID</th><th>Status</th><th>Performance Control</th><th>Reporting</th><th>Last check</th></tr></thead>
                   <tbody>
                     {accounts.map((account) => {
                       const cls = statusClass(account.status_kind);
                       const reporting = reportingByAccount.get(account.meta_account_id);
+                      const monitoring = monitoringByAccount.get(account.meta_account_id);
                       const reportingHref = `/reporting/${encodeURIComponent(account.meta_account_id)}`;
+                      const monitoringHref = `/monitoring/${encodeURIComponent(account.meta_account_id)}`;
                       return <tr key={account.meta_account_id}>
-                        <td><Link href={reportingHref} className="accountLink"><strong>{account.name}</strong></Link></td>
+                        <td><strong>{account.name}</strong></td>
                         <td><code>{account.meta_account_id}</code></td>
                         <td className={cls}><span className={`dot ${cls}`} />{account.status_label}</td>
+                        <td>
+                          {monitoring?.enabled ? (
+                            <div className="reportingCell"><span className="ok">ON · {monitoring.source === "reporting" ? "via Reporting" : "Monitor only"}</span><div className="reportingActions"><Link className="inlineSetup" href={monitoringHref}>Керувати</Link></div></div>
+                          ) : <Link className="inlineSetup" href={monitoringHref}>Підключити</Link>}
+                        </td>
                         <td>
                           {reporting ? (
                             <div className="reportingCell">
@@ -147,7 +163,7 @@ export default async function Dashboard() {
                                 <a href={reporting.report_url} target="_blank" rel="noreferrer">Open Sheet ↗</a>
                               </div>
                             </div>
-                          ) : <Link className="inlineSetup" href={reportingHref}>Налаштувати</Link>}
+                          ) : <Link className="inlineSetup" href={reportingHref}>Налаштувати звітність</Link>}
                         </td>
                         <td>{new Date(account.last_checked_at).toLocaleString("uk-UA")}</td>
                       </tr>;
