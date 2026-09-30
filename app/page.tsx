@@ -39,7 +39,6 @@ export default async function Dashboard() {
 
   const configuredReporting = reportingConfigs.filter((item) => item.status === "configured");
   const active = accounts.filter((a) => a.status_kind === "active").length;
-  const payment = accounts.filter((a) => a.status_kind === "payment").length;
   const problems = accounts.filter((a) => a.status_kind !== "active").length;
   const reportingByAccount = new Map(configuredReporting.map((config) => [config.meta_account_id, config]));
   const monitoringByAccount = new Map(monitoringConfigs.map((config) => [config.meta_account_id, config]));
@@ -56,6 +55,7 @@ export default async function Dashboard() {
 
         <nav className="sideNav">
           <Link href="/" className="sideNavItem active"><span>⌂</span>Overview</Link>
+          <Link href="/tasks" className="sideNavItem"><span>⚡</span>Performance OS</Link>
           <a href="#accounts" className="sideNavItem"><span>◉</span>Accounts</a>
           <a href="#reporting" className="sideNavItem"><span>▥</span>Reporting</a>
           <Link href="/diagnostics" className="sideNavItem"><span>⌁</span>Diagnostics</Link>
