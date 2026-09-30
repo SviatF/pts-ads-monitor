@@ -18,12 +18,7 @@ function normalizeAccountId(value: string) {
 }
 
 function yesterdayKyivIso(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Kyiv",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   const local = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)));
   local.setUTCDate(local.getUTCDate() - 1);
@@ -38,22 +33,13 @@ function uaDate(iso: string) {
 async function resolveConfiguredAccount(raw: string) {
   const normalized = normalizeAccountId(raw.replace(/[<>]/g, ""));
   if (!/^\d{5,25}$/.test(normalized)) return null;
-  const config = await getReportingConfig(`act_${normalized}`) || await getReportingConfig(normalized);
-  return config;
+  return await getReportingConfig(`act_${normalized}`) || await getReportingConfig(normalized);
 }
 
-export async function notifyAdminReportCreated(input: {
-  projectName: string;
-  accountId: string;
-  reportUrl: string;
-  goalLabel: string;
-}) {
+export async function notifyAdminReportCreated(input: { projectName: string; accountId: string; reportUrl: string; goalLabel: string }) {
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!chatId) return;
-  await sendTelegramToChat(
-    chatId,
-    `📊 <b>PTS Reporting</b>\n\n✅ Створено звіт для <b>${escapeTelegramHtml(input.projectName)}</b>\nКабінет: <code>${escapeTelegramHtml(input.accountId)}</code>\nЦіль: <b>${escapeTelegramHtml(input.goalLabel)}</b>\n\n<a href="${escapeTelegramHtml(input.reportUrl)}">Відкрити Google Sheet</a>`,
-  );
+  await sendTelegramToChat(chatId, `📊 <b>PTS Reporting</b>\n\n✅ Створено звіт для <b>${escapeTelegramHtml(input.projectName)}</b>\nКабінет: <code>${escapeTelegramHtml(input.accountId)}</code>\nЦіль: <b>${escapeTelegramHtml(input.goalLabel)}</b>\n\n<a href="${escapeTelegramHtml(input.reportUrl)}">Відкрити Google Sheet</a>`);
 }
 
 export async function handleReportingTelegramCommand(chatId: string, text: string) {
@@ -68,14 +54,10 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
       await sendTelegramToChat(chatId, "❌ Не знайшов налаштовану звітність для цього Meta cabinet ID. Спочатку створіть Google звіт у Ads Monitor.");
       return true;
     }
-    await upsertReportingTelegramSubscription({
-      telegram_chat_id: chatId,
-      meta_account_id: config.meta_account_id,
-      account_name: config.project_name,
-    });
+    await upsertReportingTelegramSubscription({ telegram_chat_id: chatId, meta_account_id: config.meta_account_id, account_name: config.project_name });
     await sendTelegramToChat(
       chatId,
-      `✅ <b>Reporting підключено до цієї групи</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nКабінет: <code>${escapeTelegramHtml(config.meta_account_id)}</code>\n\nЩоранку о <b>07:00 Europe/Kyiv</b> бот синхронізує попередній день і напише статус у цю групу.\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
+      `✅ <b>PTS Reporting + Performance Control підключено до цієї групи</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nКабінет: <code>${escapeTelegramHtml(config.meta_account_id)}</code>${config.targetologist_telegram ? `\nТаргетолог: <b>${escapeTelegramHtml(config.targetologist_telegram)}</b>` : "\n⚠️ Таргетолог ще не вказаний у налаштуваннях проєкту."}\n\nЩоранку о <b>07:00 Europe/Kyiv</b> бот синхронізує попередній день. Окремо Performance Control перевіряє кабінет протягом дня й пушить сюди optimization alerts.\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
     );
     return true;
   }
@@ -86,10 +68,12 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
       await sendTelegramToChat(chatId, "ℹ️ У цій групі reporting ще не підключено.\n\nКоманда: <code>/reporting META_ACCOUNT_ID</code>");
       return true;
     }
-    const rows = subscriptions
-      .map((row) => `• <b>${escapeTelegramHtml(row.account_name)}</b> — <code>${escapeTelegramHtml(row.meta_account_id)}</code>`)
-      .join("\n");
-    await sendTelegramToChat(chatId, `📊 <b>Reporting subscriptions</b>\n\n${rows}`);
+    const rows: string[] = [];
+    for (const row of subscriptions) {
+      const config = await getReportingConfig(row.meta_account_id);
+      rows.push(`• <b>${escapeTelegramHtml(row.account_name)}</b> — <code>${escapeTelegramHtml(row.meta_account_id)}</code>${config?.targetologist_telegram ? ` — ${escapeTelegramHtml(config.targetologist_telegram)}` : ""}`);
+    }
+    await sendTelegramToChat(chatId, `📊 <b>Reporting + Performance subscriptions</b>\n\n${rows.join("\n")}`);
     return true;
   }
 
@@ -102,7 +86,7 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
     } else {
       await disableReportingTelegramSubscription(chatId);
     }
-    await sendTelegramToChat(chatId, "⏹ <b>Reporting notifications вимкнено</b> для вибраного кабінету/цієї групи.");
+    await sendTelegramToChat(chatId, "⏹ <b>Reporting + Performance notifications вимкнено</b> для вибраного кабінету/цієї групи.");
     return true;
   }
 
@@ -122,22 +106,11 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
     for (const target of targets) {
       const config = await getReportingConfig(target.meta_account_id);
       if (!config) continue;
-      await ensureProjectReportLifecycle({
-        spreadsheetId: config.report_file_id,
-        projectName: config.project_name,
-        goalKey: config.goal_key,
-        goalLabel: config.goal_label,
-        reportingStartDate: config.report_start_date,
-      });
-      const result = await syncMetaReporting({
-        accountId: config.meta_account_id,
-        spreadsheetId: config.report_file_id,
-        since: date,
-        until: date,
-      });
+      await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: config.report_start_date });
+      const result = await syncMetaReporting({ accountId: config.meta_account_id, spreadsheetId: config.report_file_id, since: date, until: date });
       await sendTelegramToChat(
         chatId,
-        `✅ <b>Звіт заповнено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nРезультати: <b>${result.mappedLeads}</b>\nSpend: <b>$${result.mappedSpend.toFixed(2)}</b>\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
+        `✅ <b>Звіт заповнено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>${config.targetologist_telegram ? `\nТаргетолог: <b>${escapeTelegramHtml(config.targetologist_telegram)}</b>` : ""}\nРезультати: <b>${result.mappedLeads}</b>\nSpend: <b>$${result.mappedSpend.toFixed(2)}</b>\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
       );
     }
     return true;
