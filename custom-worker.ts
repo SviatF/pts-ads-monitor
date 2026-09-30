@@ -51,7 +51,7 @@ export default {
       tasks.push(callInternal("/api/performance/check", env, ctx));
     }
 
-    // Management escalation: once per hour, after the performance check had time to finish.
+    // Management escalation: once per hour. Weekend filtering is handled by the endpoint.
     if (minute >= 20 && minute < 30) {
       tasks.push(callInternal("/api/performance/management?kind=escalations", env, ctx));
     }
@@ -61,9 +61,15 @@ export default {
       tasks.push(callInternal("/api/reporting/morning", env, ctx));
     }
 
-    // Separate daily task chat. Performance check runs at 09:00, tasks are sent at ~09:10.
-    if (hour === 9 && minute >= 10 && minute < 20) {
+    // Daily Tasks: every day around 08:10 Europe/Kyiv.
+    // On weekends the endpoint switches to a softer weekend message automatically.
+    if (hour === 8 && minute >= 10 && minute < 20) {
       tasks.push(callInternal("/api/performance/tasks", env, ctx));
+    }
+
+    // Weekday afternoon reminder: only unfinished actionable tasks.
+    if (hour === 15 && minute < 10 && weekday !== "Sat" && weekday !== "Sun") {
+      tasks.push(callInternal("/api/performance/tasks?kind=reminder", env, ctx));
     }
 
     // Internal team briefs: morning priorities + end-of-day accountability.
