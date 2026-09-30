@@ -33,6 +33,10 @@ async function request<T>(path: string): Promise<T> {
   return (text ? JSON.parse(text) : null) as T;
 }
 
+function requiresAck(item: AlertRow) {
+  return item.severity === "action_required" || item.severity === "critical";
+}
+
 export async function sendPerformanceBrief(kind: "morning" | "evening") {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const [alerts, configs] = await Promise.all([
@@ -45,22 +49,25 @@ export async function sendPerformanceBrief(kind: "morning" | "evening") {
   const critical = open.filter((item) => item.severity === "critical");
   const action = open.filter((item) => item.severity === "action_required");
   const warning = open.filter((item) => item.severity === "warning");
-  const unack = open.filter((item) => !item.acknowledged_at);
+  const unack = open.filter((item) => requiresAck(item) && !item.acknowledged_at);
   const resolved = alerts.filter((item) => item.resolved_at && new Date(item.resolved_at).getTime() >= Date.now() - 24 * 60 * 60 * 1000);
   const positive = alerts.filter((item) => ["STRONG_PERFORMANCE", "CREATIVE_WINNER"].includes(item.alert_type));
 
   const rows = open.slice(0, 8).map((item) => {
     const icon = item.severity === "critical" ? "🔴" : item.severity === "action_required" ? "🟠" : "🟡";
-    return `${icon} <b>${escapeTelegramHtml(names.get(item.meta_account_id) || item.meta_account_id)}</b> — ${escapeTelegramHtml(item.title)}${item.acknowledged_at ? " · ✅ в роботі" : " · ⏳ без реакції"}`;
+    const state = requiresAck(item)
+      ? (item.acknowledged_at ? " · ✅ в роботі" : " · ⏳ потрібна реакція")
+      : " · 👀 на контролі";
+    return `${icon} <b>${escapeTelegramHtml(names.get(item.meta_account_id) || item.meta_account_id)}</b> — ${escapeTelegramHtml(item.title)}${state}`;
   });
 
   if (kind === "morning") {
-    const message = `☀️ <b>PTS PERFORMANCE · MORNING BRIEF</b>\n\nКабінетів під контролем: <b>${activeConfigs.length}</b>\n🔴 Critical: <b>${critical.length}</b>\n🟠 Action required: <b>${action.length}</b>\n🟡 Warning: <b>${warning.length}</b>\n⏳ Без реакції: <b>${unack.length}</b>${rows.length ? `\n\n<b>Що потребує уваги:</b>\n${rows.join("\n")}` : "\n\n🟢 Активних проблем, що потребують уваги, немає."}\n\nФокус дня: закрити critical → перевірити optimization alerts → зафіксувати результат змін.`;
+    const message = `☀️ <b>PTS PERFORMANCE · MORNING BRIEF</b>\n\nКабінетів під контролем: <b>${activeConfigs.length}</b>\n🔴 Critical: <b>${critical.length}</b>\n🟠 Action required: <b>${action.length}</b>\n🟡 Warning: <b>${warning.length}</b>\n⏳ Без реакції по actionable alerts: <b>${unack.length}</b>${rows.length ? `\n\n<b>Що потребує уваги:</b>\n${rows.join("\n")}` : "\n\n🟢 Активних проблем, що потребують уваги, немає."}\n\nФокус дня: закрити critical → опрацювати action required → warnings тримати на контролі.`;
     await sendPerformanceMessage(message);
     return { kind, projects: activeConfigs.length, open: open.length, unacknowledged: unack.length };
   }
 
-  const message = `🌙 <b>PTS PERFORMANCE · END OF DAY</b>\n\nAlerts за 24 год: <b>${alerts.length}</b>\nЗакрито / recovered: <b>${resolved.length}</b>\nЩе відкрито: <b>${open.length}</b>\nБез реакції: <b>${unack.length}</b>\nPositive signals: <b>${positive.length}</b>${rows.length ? `\n\n<b>Що лишається на контролі:</b>\n${rows.join("\n")}` : "\n\n✅ На кінець дня відкритих performance-проблем немає."}`;
+  const message = `🌙 <b>PTS PERFORMANCE · END OF DAY</b>\n\nAlerts за 24 год: <b>${alerts.length}</b>\nЗакрито / recovered: <b>${resolved.length}</b>\nЩе відкрито: <b>${open.length}</b>\nБез реакції по actionable alerts: <b>${unack.length}</b>\nPositive signals: <b>${positive.length}</b>${rows.length ? `\n\n<b>Що лишається на контролі:</b>\n${rows.join("\n")}` : "\n\n✅ На кінець дня відкритих performance-проблем немає."}`;
   await sendPerformanceMessage(message);
   return { kind, projects: activeConfigs.length, open: open.length, unacknowledged: unack.length, resolved: resolved.length };
 }
