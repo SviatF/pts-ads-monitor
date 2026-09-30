@@ -1,3 +1,5 @@
+import { notifyPerformanceTaskCompleted } from "@/lib/performance-operations";
+
 export type PerformanceAlert = {
   id: number;
   meta_account_id: string;
@@ -62,7 +64,15 @@ export async function resolvePerformanceAlert(id: number, by: string) {
     method: "PATCH",
     body: JSON.stringify({ acknowledged_at: now, acknowledged_by: by, resolved_at: now, updated_at: now }),
   });
-  return rows[0] || null;
+  const alert = rows[0] || null;
+  if (alert && isActionable(alert)) {
+    try {
+      await notifyPerformanceTaskCompleted(alert);
+    } catch (error) {
+      console.warn("Could not send task completion notification", error);
+    }
+  }
+  return alert;
 }
 
 export async function addPerformanceAlertNote(id: number, by: string, note: string) {
