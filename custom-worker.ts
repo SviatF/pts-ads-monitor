@@ -17,10 +17,11 @@ function kyivClock(date = new Date()) {
     timeZone: "Europe/Kyiv",
     hour: "2-digit",
     minute: "2-digit",
+    weekday: "short",
     hour12: false,
   }).formatToParts(date);
   const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return { hour: Number(value.hour), minute: Number(value.minute) };
+  return { hour: Number(value.hour), minute: Number(value.minute), weekday: String(value.weekday || "") };
 }
 
 async function callInternal(path: string, env: Env, ctx: ExecutionContext) {
@@ -43,16 +44,26 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     hydrateProcessEnv(env);
     const tasks: Promise<unknown>[] = [callInternal("/api/monitor", env, ctx)];
-    const { hour, minute } = kyivClock();
+    const { hour, minute, weekday } = kyivClock();
 
     // Performance Control runs once per hour. Alert dedupe/cooldown is handled in DB.
     if (minute < 10) {
       tasks.push(callInternal("/api/performance/check", env, ctx));
     }
 
+    // Management escalation: once per hour, after the performance check had time to finish.
+    if (minute >= 20 && minute < 30) {
+      tasks.push(callInternal("/api/performance/management?kind=escalations", env, ctx));
+    }
+
     // At 07:00 Europe/Kyiv run lifecycle -> previous-day Meta sync -> Telegram status.
     if (hour === 7 && minute < 10) {
       tasks.push(callInternal("/api/reporting/morning", env, ctx));
+    }
+
+    // Separate daily task chat. Performance check runs at 09:00, tasks are sent at ~09:10.
+    if (hour === 9 && minute >= 10 && minute < 20) {
+      tasks.push(callInternal("/api/performance/tasks", env, ctx));
     }
 
     // Internal team briefs: morning priorities + end-of-day accountability.
@@ -61,6 +72,11 @@ export default {
     }
     if (hour === 19 && minute < 10) {
       tasks.push(callInternal("/api/performance/brief?kind=evening", env, ctx));
+    }
+
+    // Monday management scorecard + recurring-problem detector.
+    if (weekday === "Mon" && hour === 10 && minute >= 10 && minute < 20) {
+      tasks.push(callInternal("/api/performance/management?kind=weekly", env, ctx));
     }
 
     ctx.waitUntil(Promise.allSettled(tasks).then((results) => {
