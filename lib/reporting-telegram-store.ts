@@ -41,23 +41,6 @@ export async function listReportingTelegramSubscriptions(chatId?: string) {
 }
 
 export async function listReportingTelegramSubscriptionsForAccount(metaAccountId: string) {
-  // Performance Control must never push optimization alerts into client reporting groups.
-  // When PERFORMANCE_TELEGRAM_CHAT_ID is configured, every account is routed only to that
-  // single internal team group, regardless of any /reporting bindings that may exist elsewhere.
-  const performanceChatId = process.env.PERFORMANCE_TELEGRAM_CHAT_ID?.trim();
-  if (performanceChatId) {
-    return [{
-      id: 0,
-      telegram_chat_id: performanceChatId,
-      meta_account_id: metaAccountId,
-      account_name: "PTS Performance Control",
-      enabled: true,
-      created_at: "",
-      updated_at: "",
-    } satisfies ReportingTelegramSubscription];
-  }
-
-  // Backward-compatible fallback until the dedicated internal group variable is configured.
   return request<ReportingTelegramSubscription[]>(
     `reporting_telegram_subscriptions?select=*&enabled=eq.true&meta_account_id=eq.${encodeURIComponent(metaAccountId)}`,
   );
