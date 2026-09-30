@@ -5,6 +5,7 @@ function isPublicApi(pathname: string) {
   if (pathname.startsWith("/api/monitor")) return true;
   if (pathname.startsWith("/api/reporting/morning")) return true;
   if (pathname.startsWith("/api/reporting/lifecycle")) return true;
+  if (pathname.startsWith("/api/performance/check")) return true;
   return false;
 }
 
