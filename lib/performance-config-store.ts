@@ -12,6 +12,8 @@ export type PerformanceMonitoringConfig = {
   updated_at: string;
 };
 
+type ReportingShadow = { meta_account_id: string; status: string };
+
 function config() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -46,6 +48,36 @@ export async function getPerformanceMonitoringConfig(metaAccountId: string) {
   return rows[0] || null;
 }
 
+async function ensureMonitorOnlyRuntimeRow(config: PerformanceMonitoringConfig) {
+  const reportingRows = await request<ReportingShadow[]>(`reporting_configs?select=meta_account_id,status&meta_account_id=eq.${encodeURIComponent(config.meta_account_id)}&limit=1`);
+  if (reportingRows[0]?.status === "configured") return;
+
+  await request("reporting_configs?on_conflict=meta_account_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({
+      meta_account_id: config.meta_account_id,
+      project_name: config.project_name,
+      goal_key: "result",
+      goal_label: "Result",
+      currency: null,
+      timezone: "Europe/Kyiv",
+      report_start_date: "9999-12-31",
+      report_end_date: "9999-12-31",
+      report_file_id: "MONITOR_ONLY",
+      report_url: "",
+      status: "monitor_only",
+      targetologist_telegram: config.targetologist_telegram,
+      performance_monitoring_enabled: config.enabled,
+      creative_waste_min_spend: config.creative_waste_min_spend,
+      creative_waste_cpl_multiplier: config.creative_waste_cpl_multiplier,
+      cpl_warning_pct: config.cpl_warning_pct,
+      cpl_critical_pct: config.cpl_critical_pct,
+      updated_at: new Date().toISOString(),
+    }),
+  });
+}
+
 export async function upsertPerformanceMonitoringConfig(input: {
   meta_account_id: string;
   project_name: string;
@@ -74,7 +106,9 @@ export async function upsertPerformanceMonitoringConfig(input: {
       updated_at: new Date().toISOString(),
     }),
   });
-  return rows[0];
+  const saved = rows[0];
+  if (saved?.source === "monitor_only") await ensureMonitorOnlyRuntimeRow(saved);
+  return saved;
 }
 
 export async function setPerformanceMonitoringEnabled(metaAccountId: string, enabled: boolean) {
@@ -82,5 +116,7 @@ export async function setPerformanceMonitoringEnabled(metaAccountId: string, ena
     method: "PATCH",
     body: JSON.stringify({ enabled, updated_at: new Date().toISOString() }),
   });
-  return rows[0] || null;
+  const saved = rows[0] || null;
+  if (saved?.source === "monitor_only") await ensureMonitorOnlyRuntimeRow(saved);
+  return saved;
 }
