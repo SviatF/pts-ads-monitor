@@ -5,6 +5,7 @@ import { getStoredAccount } from "@/lib/store";
 import { createProjectReport, REPORTING_GOALS } from "@/lib/google-reporting-user";
 import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
 import { getReportingConfig, upsertReportingConfig } from "@/lib/reporting-store";
+import { getPerformanceMonitoringConfig, upsertPerformanceMonitoringConfig } from "@/lib/performance-config-store";
 import { syncMetaReporting } from "@/lib/meta-reporting-sync";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,11 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
   const { accountId } = await params;
   const query = await searchParams;
   const decodedId = decodeURIComponent(accountId);
-  const [account, existing] = await Promise.all([getStoredAccount(decodedId), getReportingConfig(decodedId)]);
+  const [account, existing, performanceExisting] = await Promise.all([
+    getStoredAccount(decodedId),
+    getReportingConfig(decodedId),
+    getPerformanceMonitoringConfig(decodedId),
+  ]);
 
   if (!account) {
     return <main className="shell narrowShell"><Link href="/" className="backLink">← До кабінетів</Link><section className="panel setupPanel"><div className="empty bad">Рекламний кабінет не знайдено.</div></section></main>;
@@ -86,6 +91,36 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
     redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent(message)}`);
   }
 
+  async function savePerformanceControl(formData: FormData) {
+    "use server";
+    const projectName = String(formData.get("projectName") || existing?.project_name || currentAccountName).trim();
+    const targetologistTelegram = normalizeTelegramUsername(String(formData.get("targetologistTelegram") || ""));
+    const creativeWasteMinSpend = Number(formData.get("creativeWasteMinSpend") || 15);
+    const creativeWasteCplMultiplier = Number(formData.get("creativeWasteCplMultiplier") || 1.5);
+    const cplWarningPct = Number(formData.get("cplWarningPct") || 25);
+    const cplCriticalPct = Number(formData.get("cplCriticalPct") || 40);
+
+    try {
+      await upsertPerformanceMonitoringConfig({
+        meta_account_id: currentAccountId,
+        project_name: projectName,
+        targetologist_telegram: targetologistTelegram || null,
+        enabled: true,
+        source: existing ? "reporting" : "monitor_only",
+        creative_waste_min_spend: Number.isFinite(creativeWasteMinSpend) ? creativeWasteMinSpend : 15,
+        creative_waste_cpl_multiplier: Number.isFinite(creativeWasteCplMultiplier) ? creativeWasteCplMultiplier : 1.5,
+        cpl_warning_pct: Number.isFinite(cplWarningPct) ? cplWarningPct : 25,
+        cpl_critical_pct: Number.isFinite(cplCriticalPct) ? cplCriticalPct : 40,
+      });
+      revalidatePath("/");
+      revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
+    } catch (error) {
+      redirect(`/reporting/${encodeURIComponent(currentAccountId)}?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
+    }
+
+    redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent("Performance Control збережено. Google-таблицю та внесені менеджерами дані не змінено.")}`);
+  }
+
   async function syncMeta(formData: FormData) {
     "use server";
     const since = String(formData.get("since") || "");
@@ -107,13 +142,19 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
     redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent(successMessage)}`);
   }
 
+  const performanceTelegram = performanceExisting?.targetologist_telegram || existing?.targetologist_telegram || "";
+  const performanceMinSpend = performanceExisting?.creative_waste_min_spend ?? existing?.creative_waste_min_spend ?? 15;
+  const performanceMultiplier = performanceExisting?.creative_waste_cpl_multiplier ?? existing?.creative_waste_cpl_multiplier ?? 1.5;
+  const performanceWarning = performanceExisting?.cpl_warning_pct ?? existing?.cpl_warning_pct ?? 25;
+  const performanceCritical = performanceExisting?.cpl_critical_pct ?? existing?.cpl_critical_pct ?? 40;
+
   return (
     <main className="shell narrowShell">
       <Link href="/" className="backLink">← До кабінетів</Link>
       <div className="setupHero"><div className="eyebrow">PTS Reporting · Project Setup</div><h1>Налаштувати звітність</h1><p className="subtitle">Одна Google Таблиця = один проєкт. Meta автоматично заповнює C (Результат) та E (Витрати), менеджери вручну вносять B/G/H/J/L/M/O, решта KPI та weekly totals рахуються формулами.</p></div>
       <section className="panel setupPanel">
         <div className="panelHead"><div><strong>{account.name}</strong><div className="eyebrow setupAccountId">{account.meta_account_id}</div></div><span className={`statusPill ${existing ? "ok" : "warn"}`}>{existing ? "Reporting configured" : "Needs setup"}</span></div>
-        {existing ? <div className="configuredBox"><div><div className="eyebrow">Поточний звіт</div><h2>{existing.project_name}</h2><p className="subtitle">Кінцева ціль: <strong>{existing.goal_label}</strong>{existing.targetologist_telegram ? <> · Таргетолог: <strong>{existing.targetologist_telegram}</strong></> : null}</p></div><a className="runButton linkButton" href={existing.report_url} target="_blank" rel="noreferrer">Відкрити Google Sheet</a></div> : null}
+        {existing ? <div className="configuredBox"><div><div className="eyebrow">Поточний звіт</div><h2>{existing.project_name}</h2><p className="subtitle">Кінцева ціль: <strong>{existing.goal_label}</strong>{performanceTelegram ? <> · Таргетолог: <strong>{performanceTelegram}</strong></> : null}</p></div><a className="runButton linkButton" href={existing.report_url} target="_blank" rel="noreferrer">Відкрити Google Sheet</a></div> : null}
         {query.error ? <div className="formError">{query.error}</div> : null}
         {query.message ? <div className="empty good">{query.message}</div> : null}
         {existing ? (
@@ -127,7 +168,7 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
         ) : null}
         <form action={createReport} className="setupForm">
           <label><span>Назва проєкту</span><input name="projectName" defaultValue={existing?.project_name || account.name} required /></label>
-          <label><span>Telegram таргетолога</span><input name="targetologistTelegram" defaultValue={existing?.targetologist_telegram || ""} placeholder="@username" required /><small>Цього спеціаліста бот тегатиме у performance-alerts для цього кабінету.</small></label>
+          <label><span>Telegram таргетолога</span><input name="targetologistTelegram" defaultValue={performanceTelegram} placeholder="@username" required /><small>Цього спеціаліста бот тегатиме у performance-alerts для цього кабінету.</small></label>
           <label><span>Кінцева ціль запусків</span><select name="goalKey" defaultValue={existing?.goal_key || "sale"}>{REPORTING_GOALS.map((goal) => <option key={goal.key} value={goal.key}>{goal.label}</option>)}</select><small>Фінальна ціль автоматично змінюється в weekly, daily та monthly блоках.</small></label>
           <label><span>Інша ціль, якщо обрано «Інше»</span><input name="customGoal" placeholder="Наприклад: Депозит, Договір, Оплата" /></label>
           <label><span>З якої дати вести звітність проєкту</span><input type="date" name="startDate" defaultValue={existing?.report_start_date || todayIso()} required /><small>Фіксовані 4 періоди місяця: 01–07, 08–15, 16–22, 23–кінець місяця.</small></label>
@@ -136,17 +177,24 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
             <div>
               <div className="eyebrow">PTS Performance Control</div>
               <h2>Автоматичний контроль оптимізації</h2>
-              <p className="subtitle">Алерти йдуть тільки в Telegram-групи, які привʼязані командою <code>/reporting META_ACCOUNT_ID</code>, і тегають закріпленого таргетолога.</p>
+              <p className="subtitle">Performance-alerts йдуть тільки у внутрішню Telegram-групу PTS через <code>PERFORMANCE_TELEGRAM_CHAT_ID</code> і тегають закріпленого таргетолога.</p>
             </div>
           </div>
           <input type="hidden" name="performanceMonitoringEnabled" value="1" />
-          <label><span>Мін. spend креативу без результату</span><input type="number" name="creativeWasteMinSpend" min="1" step="1" defaultValue={existing?.creative_waste_min_spend ?? 15} /><small>До цього spend система не робить висновок, що креатив потребує оптимізації.</small></label>
-          <label><span>Коефіцієнт Creative Waste відносно CPL інших креативів</span><input type="number" name="creativeWasteCplMultiplier" min="1" step="0.1" defaultValue={existing?.creative_waste_cpl_multiplier ?? 1.5} /><small>Наприклад 1.5×: якщо інші креативи вже дають ліди, а проблемний спалив ≥1.5 середнього CPL без результату — пушимо.</small></label>
-          <label><span>CPL warning, % росту</span><input type="number" name="cplWarningPct" min="5" step="5" defaultValue={existing?.cpl_warning_pct ?? 25} /></label>
-          <label><span>CPL critical, % росту</span><input type="number" name="cplCriticalPct" min="10" step="5" defaultValue={existing?.cpl_critical_pct ?? 40} /></label>
+          <label><span>Мін. spend креативу без результату</span><input type="number" name="creativeWasteMinSpend" min="1" step="1" defaultValue={performanceMinSpend} /><small>До цього spend система не робить висновок, що креатив потребує оптимізації.</small></label>
+          <label><span>Коефіцієнт Creative Waste відносно CPL інших креативів</span><input type="number" name="creativeWasteCplMultiplier" min="1" step="0.1" defaultValue={performanceMultiplier} /><small>Наприклад 1.5×: якщо інші креативи вже дають ліди, а проблемний спалив ≥1.5 середнього CPL без результату — пушимо.</small></label>
+          <label><span>CPL warning, % росту</span><input type="number" name="cplWarningPct" min="5" step="5" defaultValue={performanceWarning} /></label>
+          <label><span>CPL critical, % росту</span><input type="number" name="cplCriticalPct" min="10" step="5" defaultValue={performanceCritical} /></label>
+
+          {existing ? (
+            <div className="setupActions">
+              <button className="runButton primaryAction" type="submit" formAction={savePerformanceControl}>Зберегти Performance Control</button>
+              <span className="subtitle">Змінюються тільки налаштування моніторингу. Google Sheet, формули та дані менеджерів не чіпаємо.</span>
+            </div>
+          ) : null}
 
           {existing ? <input type="hidden" name="replaceExisting" value="1" /> : null}
-          {existing ? <div className="dangerZone"><div><strong>Перестворити звіт</strong><p>Буде створена нова Google-таблиця з актуального master-шаблону та підключена до цього проєкту. Поточна таблиця не видаляється і залишиться як backup.</p></div><button className="runButton dangerAction" type="submit">Перестворити звіт</button></div> : <div className="setupActions"><button className="runButton primaryAction" type="submit">Створити Google звіт</button><Link href="/" className="secondaryButton">Скасувати</Link></div>}
+          {existing ? <div className="dangerZone"><div><strong>Перестворити звіт</strong><p>Буде створена нова Google-таблиця з актуального master-шаблону та підключена до цього проєкту. Поточна таблиця не видаляється і залишиться як backup. Використовуйте цю кнопку лише коли справді потрібна нова таблиця.</p></div><button className="runButton dangerAction" type="submit">Перестворити звіт</button></div> : <div className="setupActions"><button className="runButton primaryAction" type="submit">Створити Google звіт</button><Link href="/" className="secondaryButton">Скасувати</Link></div>}
         </form>
       </section>
     </main>
