@@ -62,7 +62,7 @@ async function accessToken() {
   const key = await crypto.subtle.importKey("pkcs8", pemToArrayBuffer(privateKey), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
   const signature = await crypto.subtle.sign({ name: "RSASSA-PKCS1-v1_5" }, key, new TextEncoder().encode(unsigned));
   const assertion = `${unsigned}.${bytesToBase64Url(new Uint8Array(signature))}`;
-  const response = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }) });
+  const response = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth-type:jwt-bearer", assertion }) });
   if (!response.ok) throw new Error(`Google OAuth failed (${response.status}): ${await response.text()}`);
   const body = (await response.json()) as { access_token: string; expires_in: number };
   tokenCache = { token: body.access_token, expiresAt: Date.now() + body.expires_in * 1000 };
@@ -163,6 +163,9 @@ function commonSheetValues(sheetTitle: string, projectName: string, start: Date,
     { range: `${sheet}!${PTS_REPORT_TEMPLATE.focusCell}`, values: [[`Фокус: Цільовий лід → A-лід → проведена зустріч → ${goalFocus}`]] },
   ];
   for (const row of headerRows) {
+    data.push({ range: `${sheet}!B${row}`, values: [["Загальна\nкількість лідів"]] });
+    data.push({ range: `${sheet}!C${row}`, values: [["Результат"]] });
+    data.push({ range: `${sheet}!D${row}`, values: [["% різниці між\nрезультатом та\nлідами"]] });
     data.push({ range: `${sheet}!O${row}`, values: [[goalColumn]] });
     data.push({ range: `${sheet}!P${row}`, values: [[`Конверсія\nЗ → ${goalFocus}`]] });
   }
@@ -189,8 +192,8 @@ function cellFormulaForMonthly(column: string, row: number, weeklyTitles: string
   const sumColumns = new Set(["B", "C", "E", "G", "H", "J", "L", "M", "O"]);
   if (sumColumns.has(column)) return `=SUM(${refs.join(";")})`;
   switch (column) {
-    case "D": return `=IFERROR(1-C${row}/B${row};0)`;
-    case "F": return `=IFERROR(E${row}/C${row};0)`;
+    case "D": return `=IFERROR(1-B${row}/C${row};0)`;
+    case "F": return `=IFERROR(E${row}/B${row};0)`;
     case "I": return `=IFERROR(H${row}/B${row};0)`;
     case "K": return `=IFERROR(J${row}/G${row};0)`;
     case "N": return `=IFERROR(L${row}/J${row};0)`;
@@ -241,8 +244,6 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
   const existing = new Set(sheets.map((sheet) => sheet.properties.title));
   const created: string[] = [];
 
-  // On the first day of a month the previous month is closed first, so at 07:00
-  // the monthly summary is created before the new 01–07 weekly sheet.
   if (today.getUTCDate() === 1) {
     const previousMonth = addMonths(startOfMonth(today), -1);
     if (previousMonth >= startOfMonth(reportingStart)) {
