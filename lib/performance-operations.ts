@@ -70,8 +70,22 @@ function kyivDateKey() {
   }).format(new Date());
 }
 
+function kyivWeekday() {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Kyiv", weekday: "short" }).format(new Date());
+}
+
+function isWeekend() {
+  const day = kyivWeekday();
+  return day === "Sat" || day === "Sun";
+}
+
+function pickDaily(variants: string[]) {
+  const key = kyivDateKey().replace(/-/g, "");
+  return variants[Number(key.slice(-4)) % variants.length];
+}
+
 function greetingForToday() {
-  const variants = [
+  return pickDaily([
     "Доброго ранку 😈 Знаю, ви мене не любите, але кабінети вже прокинулись і принесли нам задачі. Розбираємо сьогодні — і живемо спокійно.",
     "Доброго ранку ☕ Я знову прийшов псувати вам каву цифрами. Хороша новина: список задач уже готовий, залишилось тільки закрити його сьогодні.",
     "Ранок добрий 😎 Кабінети вночі без нас не нудьгували, тому маємо кілька моментів на сьогодні. Без паніки — просто йдемо по списку.",
@@ -80,14 +94,58 @@ function greetingForToday() {
     "Morning, team 🫡 Сьогодні без мотиваційних цитат. Є кабінети, є цифри, є задачі. Все чесно. Поїхали.",
     "Доброго ранку 🧠 Я перевірив кабінети, щоб вам не довелось починати день з 48 вкладок Ads Manager. Нижче ваш персональний список.",
     "Всім привіт 🌚 Так, це знову я. Ні, вимкнути мене не можна. Але можна швидко закрити задачі нижче й більше мене сьогодні не бачити.",
-  ];
-  const key = kyivDateKey().replace(/-/g, "");
-  const idx = Number(key.slice(-4)) % variants.length;
-  return variants[idx];
+  ]);
+}
+
+function weekendGreeting(hasTasks: boolean) {
+  const intro = pickDaily([
+    "Сьогодні вихідний 😴 Я теж планував мовчати, але спочатку перевірив кабінети. Професійна деформація, нічого не поробиш.",
+    "Вихідний 🏖 Ads Manager сьогодні офіційно не головний екран вашого телефону. Відпочивайте — ви це заслужили.",
+    "Доброго ранку ☕ Сьогодні вихідний. Бот урочисто дозволяє не відкривати 48 вкладок з рекламою.",
+    "Weekend mode activated 😎 Сьогодні без гонки, без дедлайнів і бажано без фрази «я тільки на хвилинку зайду в кабінет».",
+    "Сьогодні вихідний 🛌 Я прийшов не псувати настрій, а нагадати: іноді performance росте навіть тоді, коли таргетолог відпочиває 😄",
+  ]);
+  return hasTasks
+    ? `${intro}\n\nЄ кілька моментів, які залишаються на контролі. <b>Як будете мати вільний час — гляньте, будь ласка.</b> Без режиму «терміново все кидати».`
+    : `${intro}\n\n🟢 Нічого критичного не горить. Відпочивайте спокійно — сьогодні я від вас відчеплюсь.`;
 }
 
 function severityIcon(alert: AlertRow) {
   return alert.severity === "critical" ? "🔴" : "🟠";
+}
+
+function groupTasks(alerts: AlertRow[], configs: Awaited<ReturnType<typeof listPerformanceMonitoringConfigs>>) {
+  const configByAccount = new Map(configs.filter((c) => c.enabled).map((c) => [c.meta_account_id, c]));
+  const grouped = new Map<string, AlertRow[]>();
+  for (const alert of alerts) {
+    const config = configByAccount.get(alert.meta_account_id);
+    if (!config) continue;
+    const owner = config.targetologist_telegram?.trim() || "__unassigned__";
+    const rows = grouped.get(owner) || [];
+    rows.push(alert);
+    grouped.set(owner, rows);
+  }
+  return grouped;
+}
+
+async function sendGroupedTasks(chatId: string, grouped: Map<string, AlertRow[]>, configs: Awaited<ReturnType<typeof listPerformanceMonitoringConfigs>>, weekend: boolean, reminder = false) {
+  const configNames = new Map(configs.map((c) => [c.meta_account_id, c.project_name]));
+  for (const [owner, rows] of grouped) {
+    rows.sort((a, b) => Number(b.severity === "critical") - Number(a.severity === "critical"));
+    const lines = rows.map((alert, index) => {
+      const project = configNames.get(alert.meta_account_id) || alert.meta_account_id;
+      const status = alert.acknowledged_at ? "✅ вже в роботі" : "⏳ ще не взято";
+      return `${index + 1}. ${severityIcon(alert)} <b>${escapeTelegramHtml(project)}</b>\n   ${escapeTelegramHtml(alert.title)} · ${status}\n   Alert #<code>${alert.id}</code>${alert.acknowledged_at ? ` · завершити: <code>/perf_done ${alert.id}</code>` : ` · взяти: <code>/perf_ack ${alert.id}</code>`}`;
+    });
+    const mention = owner === "__unassigned__" ? "⚠️ <b>Без призначеного таргетолога</b>" : `<b>${cleanUsername(owner)}</b>`;
+    const heading = reminder ? "Ще залишилось на сьогодні:" : weekend ? "На контролі у вихідний:" : "Задачі по кабінетах на сьогодні:";
+    const footer = reminder
+      ? "Якщо задача вже вирішена — закрийте її командою <code>/perf_done ID</code>."
+      : weekend
+        ? "Як буде зручно — перегляньте. Якщо взяли в роботу: <code>/perf_ack ID</code>, після виконання: <code>/perf_done ID</code>."
+        : "Після виконання закрийте задачу командою <code>/perf_done ID</code>. Якщо хочете зафіксувати, що саме зробили: <code>/perf_note ID текст</code>.";
+    await sendTelegramToChat(chatId, `👤 ${mention}\n\n<b>${heading}</b>\n\n${lines.join("\n\n")}\n\n${footer}`);
+  }
 }
 
 export async function sendDailyPerformanceTasks() {
@@ -99,63 +157,80 @@ export async function sendDailyPerformanceTasks() {
     listPerformanceMonitoringConfigs(),
   ]);
   const alerts = alertsRaw.filter(isActionable);
-  const configByAccount = new Map(configs.filter((c) => c.enabled).map((c) => [c.meta_account_id, c]));
+  const weekend = isWeekend();
+  const grouped = groupTasks(alerts, configs);
 
-  await sendTelegramToChat(chatId, `☀️ <b>PTS TASKS · ${escapeTelegramHtml(kyivDateKey())}</b>\n\n${greetingForToday()}`);
+  await sendTelegramToChat(
+    chatId,
+    `${weekend ? "🏖" : "☀️"} <b>PTS TASKS · ${escapeTelegramHtml(kyivDateKey())}</b>\n\n${weekend ? weekendGreeting(alerts.length > 0) : greetingForToday()}`,
+  );
 
   if (!alerts.length) {
-    await sendTelegramToChat(chatId, "🟢 <b>Сьогодні активних Action Required / Critical задач немає.</b>\n\nНасолоджуйтесь моментом. Бот теж здивований 😄");
-    return { tasks: 0, targetologists: 0 };
+    if (!weekend) {
+      await sendTelegramToChat(chatId, "🟢 <b>Сьогодні активних Action Required / Critical задач немає.</b>\n\nНасолоджуйтесь моментом. Бот теж здивований 😄");
+    }
+    return { tasks: 0, targetologists: 0, weekend };
   }
 
-  const grouped = new Map<string, AlertRow[]>();
-  for (const alert of alerts) {
-    const config = configByAccount.get(alert.meta_account_id);
-    if (!config) continue;
-    const owner = config.targetologist_telegram?.trim() || "__unassigned__";
-    const rows = grouped.get(owner) || [];
-    rows.push(alert);
-    grouped.set(owner, rows);
-  }
+  await sendGroupedTasks(chatId, grouped, configs, weekend, false);
+  return { tasks: alerts.length, targetologists: grouped.size, weekend };
+}
 
-  for (const [owner, rows] of grouped) {
-    rows.sort((a, b) => Number(b.severity === "critical") - Number(a.severity === "critical"));
-    const configNames = new Map(configs.map((c) => [c.meta_account_id, c.project_name]));
-    const lines = rows.map((alert, index) => {
-      const project = configNames.get(alert.meta_account_id) || alert.meta_account_id;
-      const status = alert.acknowledged_at ? "✅ вже в роботі" : "⏳ потрібно взяти";
-      return `${index + 1}. ${severityIcon(alert)} <b>${escapeTelegramHtml(project)}</b>\n   ${escapeTelegramHtml(alert.title)} · ${status}\n   Alert #<code>${alert.id}</code>${alert.acknowledged_at ? ` · завершити: <code>/perf_done ${alert.id}</code>` : ` · взяти: <code>/perf_ack ${alert.id}</code>`}`;
-    });
-    const mention = owner === "__unassigned__" ? "⚠️ <b>Без призначеного таргетолога</b>" : `<b>${cleanUsername(owner)}</b>`;
-    await sendTelegramToChat(
-      chatId,
-      `👤 ${mention}\n\n<b>Задачі по кабінетах на сьогодні:</b>\n\n${lines.join("\n\n")}\n\nПісля виконання закрийте задачу командою <code>/perf_done ID</code>. Якщо хочете зафіксувати, що саме зробили: <code>/perf_note ID текст</code>.`,
-    );
-  }
+export async function sendUnfinishedTaskReminder() {
+  if (isWeekend()) return { tasks: 0, targetologists: 0, skipped: "weekend" };
+  const chatId = taskChatId();
+  if (!chatId) throw new Error("TASKS_TELEGRAM_CHAT_ID is not configured");
 
+  const [alertsRaw, configs] = await Promise.all([
+    request<AlertRow[]>("performance_alerts?select=*&resolved_at=is.null&severity=in.(critical,action_required)&order=last_seen_at.desc&limit=300"),
+    listPerformanceMonitoringConfigs(),
+  ]);
+  const alerts = alertsRaw.filter(isActionable);
+  if (!alerts.length) return { tasks: 0, targetologists: 0 };
+
+  const grouped = groupTasks(alerts, configs);
+  await sendTelegramToChat(chatId, "👀 <b>ДЕННИЙ CHECK-IN</b>\n\nНагадую тільки про те, що ще не закрито. Якщо вже вирішили — просто поставте <code>/perf_done ID</code>, і я перестану переслідувати вас цією задачею 😄");
+  await sendGroupedTasks(chatId, grouped, configs, false, true);
   return { tasks: alerts.length, targetologists: grouped.size };
+}
+
+export async function notifyPerformanceTaskCompleted(alert: AlertRow) {
+  const chatId = taskChatId();
+  if (!chatId) return 0;
+  const configs = await listPerformanceMonitoringConfigs();
+  const config = configs.find((item) => item.meta_account_id === alert.meta_account_id);
+  const project = config?.project_name || alert.meta_account_id;
+  const owner = cleanUsername(config?.targetologist_telegram);
+  await sendTelegramToChat(
+    chatId,
+    `✅ <b>ЗАДАЧУ ЗАКРИТО</b>\n\nПроєкт: <b>${escapeTelegramHtml(project)}</b>\nПроблема: ${escapeTelegramHtml(alert.title)}${owner ? `\nТаргетолог: ${owner}` : ""}\nAlert: <code>#${alert.id}</code>\n\nДякую. По цій задачі бот офіційно відстав 😄`,
+  );
+  return 1;
 }
 
 export async function sendManagementEscalations() {
   const chatId = managementChatId();
   if (!chatId) return { sent: 0, skipped: "MANAGEMENT_TELEGRAM_CHAT_ID is not configured" };
 
+  const weekend = isWeekend();
   const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+  const severityFilter = weekend ? "critical" : "critical,action_required";
   const [alertsRaw, configs] = await Promise.all([
-    request<AlertRow[]>(`performance_alerts?select=*&resolved_at=is.null&acknowledged_at=is.null&severity=in.(critical,action_required)&last_notified_at=lte.${encodeURIComponent(cutoff)}&order=last_notified_at.asc&limit=100`),
+    request<AlertRow[]>(`performance_alerts?select=*&resolved_at=is.null&acknowledged_at=is.null&severity=in.(${severityFilter})&last_notified_at=lte.${encodeURIComponent(cutoff)}&order=last_notified_at.asc&limit=100`),
     listPerformanceMonitoringConfigs(),
   ]);
   const configByAccount = new Map(configs.map((c) => [c.meta_account_id, c]));
   let sent = 0;
 
   for (const alert of alertsRaw.filter(isActionable)) {
+    if (weekend && alert.severity !== "critical") continue;
     if (alert.details?.management_escalated_at) continue;
     const config = configByAccount.get(alert.meta_account_id);
     if (!config) continue;
     const ageHours = alert.last_notified_at ? Math.max(4, (Date.now() - new Date(alert.last_notified_at).getTime()) / 3600000) : 4;
     await sendTelegramToChat(
       chatId,
-      `🚨 <b>MANAGEMENT ESCALATION</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nТаргетолог: ${cleanUsername(config.targetologist_telegram) || "<b>не призначений</b>"}\nПроблема: <b>${escapeTelegramHtml(alert.title)}</b>\nAlert: <code>#${alert.id}</code>\nБез підтвердження: <b>${ageHours.toFixed(1)} год</b>\n\nКоманда ще не взяла критичну/action-required задачу в роботу.`,
+      `🚨 <b>MANAGEMENT ESCALATION</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nТаргетолог: ${cleanUsername(config.targetologist_telegram) || "<b>не призначений</b>"}\nПроблема: <b>${escapeTelegramHtml(alert.title)}</b>\nAlert: <code>#${alert.id}</code>\nБез підтвердження: <b>${ageHours.toFixed(1)} год</b>${weekend ? "\n\n🏖 Сьогодні вихідний, тому ескалуємо тільки Critical." : "\n\nКоманда ще не взяла критичну/action-required задачу в роботу."}`,
     );
     await request(`performance_alerts?id=eq.${alert.id}`, {
       method: "PATCH",
@@ -166,7 +241,7 @@ export async function sendManagementEscalations() {
     });
     sent += 1;
   }
-  return { sent };
+  return { sent, weekend };
 }
 
 function median(values: number[]) {
