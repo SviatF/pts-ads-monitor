@@ -40,7 +40,15 @@ async function request<T>(path: string, init: RequestInit = {}) {
   return (text ? JSON.parse(text) : null) as T;
 }
 
+function isActionable(alert: PerformanceAlert) {
+  return alert.severity === "action_required" || alert.severity === "critical";
+}
+
 export async function acknowledgePerformanceAlert(id: number, by: string) {
+  const existing = await request<PerformanceAlert[]>(`performance_alerts?id=eq.${id}&limit=1`);
+  const alert = existing[0];
+  if (!alert || !isActionable(alert)) return null;
+
   const rows = await request<PerformanceAlert[]>(`performance_alerts?id=eq.${id}`, {
     method: "PATCH",
     body: JSON.stringify({ acknowledged_at: new Date().toISOString(), acknowledged_by: by, updated_at: new Date().toISOString() }),
