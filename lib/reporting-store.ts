@@ -22,6 +22,14 @@ export type ReportingConfig = {
   updated_at: string;
 };
 
+type ReportingConfigInput = Omit<ReportingConfig,
+  "created_at" | "updated_at" | "targetologist_telegram" | "performance_monitoring_enabled" |
+  "creative_waste_min_spend" | "creative_waste_cpl_multiplier" | "cpl_warning_pct" | "cpl_critical_pct"
+> & Partial<Pick<ReportingConfig,
+  "targetologist_telegram" | "performance_monitoring_enabled" | "creative_waste_min_spend" |
+  "creative_waste_cpl_multiplier" | "cpl_warning_pct" | "cpl_critical_pct"
+>>;
+
 function config() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -42,12 +50,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
     cache: "no-store",
   });
-
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Supabase reporting request failed (${response.status}): ${text}`);
   }
-
   const text = await response.text();
   return (text ? JSON.parse(text) : null) as T;
 }
@@ -57,24 +63,29 @@ export async function listReportingConfigs(): Promise<ReportingConfig[]> {
 }
 
 export async function getReportingConfig(metaAccountId: string): Promise<ReportingConfig | null> {
-  const rows = await request<ReportingConfig[]>(
-    `reporting_configs?meta_account_id=eq.${encodeURIComponent(metaAccountId)}&limit=1`,
-  );
+  const rows = await request<ReportingConfig[]>(`reporting_configs?meta_account_id=eq.${encodeURIComponent(metaAccountId)}&limit=1`);
   return rows[0] || null;
 }
 
-export async function upsertReportingConfig(
-  row: Omit<ReportingConfig, "created_at" | "updated_at">,
-): Promise<ReportingConfig> {
+export async function upsertReportingConfig(row: ReportingConfigInput): Promise<ReportingConfig> {
   const existing = await getReportingConfig(row.meta_account_id);
   const now = new Date().toISOString();
+  const payload = {
+    ...row,
+    targetologist_telegram: row.targetologist_telegram ?? existing?.targetologist_telegram ?? null,
+    performance_monitoring_enabled: row.performance_monitoring_enabled ?? existing?.performance_monitoring_enabled ?? true,
+    creative_waste_min_spend: row.creative_waste_min_spend ?? existing?.creative_waste_min_spend ?? 15,
+    creative_waste_cpl_multiplier: row.creative_waste_cpl_multiplier ?? existing?.creative_waste_cpl_multiplier ?? 1.5,
+    cpl_warning_pct: row.cpl_warning_pct ?? existing?.cpl_warning_pct ?? 25,
+    cpl_critical_pct: row.cpl_critical_pct ?? existing?.cpl_critical_pct ?? 40,
+    updated_at: now,
+  };
   const rows = await request<ReportingConfig[]>("reporting_configs?on_conflict=meta_account_id", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-    body: JSON.stringify({ ...row, updated_at: now }),
+    body: JSON.stringify(payload),
   });
   const saved = rows[0];
-
   const adminChatId = process.env.TELEGRAM_CHAT_ID;
   if (adminChatId && saved && (!existing || existing.report_file_id !== saved.report_file_id)) {
     try {
@@ -86,6 +97,5 @@ export async function upsertReportingConfig(
       console.error("Could not notify main Telegram chat about report creation", error);
     }
   }
-
   return saved;
 }
