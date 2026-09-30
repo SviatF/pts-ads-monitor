@@ -63,3 +63,5 @@ Healthy accounts stay silent.
 ## Notes
 
 Meta permissions and available status fields depend on the access token and Business Manager setup. The monitor intentionally does not assume every disabled account is a payment failure; only billing-related Meta account status codes are labeled as payment states.
+
+<!-- deploy trigger: latest main 2026-09-30 -->
