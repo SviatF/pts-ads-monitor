@@ -102,8 +102,7 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
 
   if (text === "/tasks_today" || text.startsWith("/tasks_today@")) {
     try {
-      const result = await sendDailyPerformanceTasks();
-      await sendTelegramToChat(chatId, `✅ Daily Tasks сформовано. Задач: <b>${result.tasks}</b>, таргетологів: <b>${result.targetologists}</b>.`);
+      await sendDailyPerformanceTasks();
     } catch (error) {
       await sendTelegramToChat(chatId, `❌ Tasks failed: <code>${escapeTelegramHtml(error instanceof Error ? error.message : String(error))}</code>`);
     }
