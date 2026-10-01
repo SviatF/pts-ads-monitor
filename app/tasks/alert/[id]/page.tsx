@@ -4,7 +4,7 @@ import { getPerformanceAlertById } from "@/lib/performance-dashboard";
 
 export const dynamic = "force-dynamic";
 
-type Metric = { spend?: number; results?: number; clicks?: number; impressions?: number };
+type Metric = { spend: number; results: number; clicks: number; impressions: number };
 type Diagnosis = { cplChange?: number; cpmChange?: number; ctrChange?: number; crChange?: number; reason?: string; confidence?: string };
 
 function fmt(value: string | null | undefined) {
@@ -55,10 +55,10 @@ function pct(value: number | undefined) {
   const number = Number(value || 0);
   return `${number >= 0 ? "+" : ""}${Math.round(number * 100)}%`;
 }
-function cpl(row: Metric) { return Number(row.results || 0) > 0 ? Number(row.spend || 0) / Number(row.results || 0) : 0; }
-function cpm(row: Metric) { return Number(row.impressions || 0) > 0 ? Number(row.spend || 0) / Number(row.impressions || 0) * 1000 : 0; }
-function ctr(row: Metric) { return Number(row.impressions || 0) > 0 ? Number(row.clicks || 0) / Number(row.impressions || 0) : 0; }
-function cr(row: Metric) { return Number(row.clicks || 0) > 0 ? Number(row.results || 0) / Number(row.clicks || 0) : 0; }
+function cpl(row: Metric) { return row.results > 0 ? row.spend / row.results : 0; }
+function cpm(row: Metric) { return row.impressions > 0 ? row.spend / row.impressions * 1000 : 0; }
+function ctr(row: Metric) { return row.impressions > 0 ? row.clicks / row.impressions : 0; }
+function cr(row: Metric) { return row.clicks > 0 ? row.results / row.clicks : 0; }
 function ratio(now: number, base: number) { return base > 0 ? now / base - 1 : 0; }
 
 function nextAction(alertType: string, reason?: string) {
@@ -118,7 +118,7 @@ export default async function AlertDetail({ params }: { params: Promise<{ id: st
   if (alert.alert_type.includes("SPEND_WITHOUT_RESULTS")) triggerParts.push(`сьогодні є spend, але 0 results`);
   const triggerText = triggerParts.length ? triggerParts.join(" · ") : "Alert спрацював за rule цього типу; нижче показані дані, які були збережені в момент detect.";
 
-  const diagnosticAvailable = hasV4Diag || ((recent3.impressions || 0) > 0 && (baseline7.impressions || 0) > 0);
+  const diagnosticAvailable = hasV4Diag || (recent3.impressions > 0 && baseline7.impressions > 0);
   const detailEntries = Object.entries(details).filter(([key]) => ![
     "notes", "management_escalated_at", "recent3", "baseline7", "today", "diagnosis", "campaignName", "campaign_name", "actionType", "action_type", "recentCpl", "baselineCpl", "growth", "volumeDrop"
   ].includes(key)).slice(0, 18);
@@ -155,20 +155,15 @@ export default async function AlertDetail({ params }: { params: Promise<{ id: st
               <div className="projectHealthCard"><div className="projectOwner" style={{paddingLeft:0,marginTop:0}}>Click → Result CR</div><strong>{diagnosticAvailable ? pct(crChange) : "—"}</strong><p style={{fontSize:9,color:"#777181"}}>post-click signal</p></div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1.2fr .8fr",gap:10}}>
-              <div style={{padding:"14px 16px",border:"1px solid #2d2440",borderRadius:12,background:"rgba(180,76,255,.04)"}}><span className="eyebrow purpleText">DIAGNOSIS</span><h3 style={{margin:"7px 0 5px",fontSize:17}}>{reason}</h3><p style={{margin:0,color:"#85808b",fontSize:10}}>Confidence: <b style={{color:"#fff"}}>{confidence}</b>{!diagnosticAvailable ? " · цей старий alert не зберіг CPM/CTR/CR, тому точну root-cause діагностику заднім числом зробити неможливо" : ""}</p></div>
-              <div style={{padding:"14px 16px",border:"1px solid #25342d",borderRadius:12,background:"rgba(87,239,154,.035)"}}><span className="eyebrow" style={{color:"#57ef9a"}}>NEXT ACTION</span><p style={{margin:"7px 0 0",fontSize:11,lineHeight:1.5,color:"#d6d1da"}}>{nextAction(alert.alert_type, reason)}</p></div>
+              <div style={{padding:"14px 16px",border:"1px solid #2c2634",borderRadius:12,background:"#0b0a10"}}><div className="eyebrow purpleText">DIAGNOSIS</div><strong style={{display:"block",fontSize:15,marginTop:6}}>{reason}</strong><p style={{color:"#777181",fontSize:10,margin:"5px 0 0"}}>Confidence: {confidence}</p></div>
+              <div style={{padding:"14px 16px",border:"1px solid #2c2634",borderRadius:12,background:"#0b0a10"}}><div className="eyebrow purpleText">NEXT ACTION</div><p style={{color:"#d3ccd8",fontSize:11,lineHeight:1.5,margin:"6px 0 0"}}>{nextAction(alert.alert_type, reason)}</p></div>
             </div>
           </div>
         </section>
 
-        {(hasRecent || hasBase || hasToday) ? <section className="commandPanel" style={{marginBottom:12}}>
-          <div className="commandPanelHead"><div><span className="eyebrow purpleText">PERFORMANCE WINDOWS</span><h2>Які дані порівнював бот</h2><p>Однаковий result action: <code>{actionType}</code>{campaignName !== "—" ? ` · Campaign: ${campaignName}` : ""}</p></div></div>
-          <div className="projectHealthGrid" style={{gridTemplateColumns:"repeat(3,minmax(0,1fr))"}}>
-            <div className="projectHealthCard"><div className="projectOwner" style={{paddingLeft:0,marginTop:0}}>TODAY · recovery/emergency</div><strong style={{fontSize:16}}>{money(today.spend)} · {today.results || 0} results</strong><p style={{fontSize:10,color:"#777181"}}>CPL {today.results ? money(cpl(today)) : "—"} · clicks {today.clicks || 0}</p></div>
-            <div className="projectHealthCard"><div className="projectOwner" style={{paddingLeft:0,marginTop:0}}>RECENT 3D · current</div><strong style={{fontSize:16}}>{money(recent3.spend)} · {recent3.results || 0} results</strong><p style={{fontSize:10,color:"#777181"}}>CPL {recent3.results ? money(cpl(recent3)) : "—"} · clicks {recent3.clicks || 0}</p></div>
-            <div className="projectHealthCard"><div className="projectOwner" style={{paddingLeft:0,marginTop:0}}>BASELINE 7D · reference</div><strong style={{fontSize:16}}>{money(baseline7.spend)} · {baseline7.results || 0} results</strong><p style={{fontSize:10,color:"#777181"}}>CPL {baseline7.results ? money(cpl(baseline7)) : "—"} · clicks {baseline7.clicks || 0}</p></div>
-          </div>
-        </section> : null}
+        {(hasToday || hasRecent || hasBase) ? <section className="commandPanel" style={{marginBottom:12}}><div className="commandPanelHead"><div><span className="eyebrow purpleText">PERFORMANCE WINDOWS</span><h2>Що саме порівнював бот</h2><p>Today використовується для recovery/emergency, Recent 3D — current performance, Baseline 7D — історична база.</p></div></div><div className="projectHealthGrid">
+          {[{label:"TODAY",row:today,show:hasToday},{label:"RECENT 3D",row:recent3,show:hasRecent},{label:"BASELINE 7D",row:baseline7,show:hasBase}].filter((item)=>item.show).map(({label,row})=><div className="projectHealthCard" key={label}><div className="projectCardTop"><div><span className="projectHealthDot">●</span><strong>{label}</strong></div></div><div className="projectSignals" style={{marginTop:10}}><div><span>Spend</span><strong>{money(row.spend)}</strong></div><div><span>Results</span><strong>{row.results}</strong></div><div><span>CPL</span><strong>{row.results > 0 ? money(cpl(row)) : "—"}</strong></div></div><div className="projectSignals" style={{marginTop:5}}><div><span>Clicks</span><strong>{row.clicks}</strong></div><div><span>CPM</span><strong>{row.impressions > 0 ? money(cpm(row)) : "—"}</strong></div><div><span>CTR</span><strong>{row.impressions > 0 ? `${(ctr(row)*100).toFixed(2)}%` : "—"}</strong></div></div></div>)}
+        </div></section> : null}
 
         <section className="performanceOverviewGrid">
           <div className="commandPanel">
@@ -195,7 +190,7 @@ export default async function AlertDetail({ params }: { params: Promise<{ id: st
           </div>
         </section>
 
-        {detailEntries.length ? <section className="commandPanel" style={{marginBottom:12}}><div className="commandPanelHead"><div><span className="eyebrow purpleText">TECHNICAL DETAILS</span><h2>Додаткові raw signals</h2><p>Для дебагу. Основне пояснення alert вже показано вище.</p></div></div><div className="projectHealthGrid">{detailEntries.map(([key,value]) => <div className="projectHealthCard" key={key}><div className="projectOwner" style={{paddingLeft:0,marginTop:0}}>{key}</div><strong style={{fontSize:13,wordBreak:"break-word"}}>{valueText(value)}</strong></div>)}</div></section> : null}
+        {detailEntries.length ? <section className="commandPanel" style={{marginBottom:12}}><div className="commandPanelHead"><div><span className="eyebrow purpleText">TECHNICAL DETAILS</span><h2>Raw signals</h2><p>Службові поля для глибокого debug. Основне пояснення вже вище.</p></div></div><div className="projectHealthGrid">{detailEntries.map(([key,value]) => <div className="projectHealthCard" key={key}><div className="projectOwner" style={{paddingLeft:0,marginTop:0}}>{key}</div><strong style={{fontSize:13,wordBreak:"break-word"}}>{valueText(value)}</strong></div>)}</div></section> : null}
 
         {config ? <section className="commandPanel"><div className="commandPanelHead"><div><span className="eyebrow purpleText">PROJECT CONTEXT</span><h2>Перейти до проєкту</h2><p>30-денна історія, recurring issues та SLA.</p></div><Link className="runButton primaryAction" href={`/tasks/project/${encodeURIComponent(alert.meta_account_id)}`}>Відкрити Project Control →</Link></div></section> : null}
       </div>
