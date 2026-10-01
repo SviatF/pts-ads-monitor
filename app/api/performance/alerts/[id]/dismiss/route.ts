@@ -9,7 +9,7 @@ function cfg() {
   return { url, key };
 }
 
-async function request<T>(path: string, init: RequestInit = {}) {
+async function supabaseRequest<T>(path: string, init: RequestInit = {}) {
   const { url, key } = cfg();
   const response = await fetch(`${url}/rest/v1/${path}`, {
     ...init,
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ ok: false, error: "Invalid alert id" }, { status: 400 });
   }
 
-  const rows = await request<AlertRow[]>(`performance_alerts?select=id,details&id=eq.${id}&limit=1`);
+  const rows = await supabaseRequest<AlertRow[]>(`performance_alerts?select=id,details&id=eq.${id}&limit=1`);
   const alert = rows[0];
   if (!alert) return NextResponse.json({ ok: false, error: "Alert not found" }, { status: 404 });
 
@@ -54,13 +54,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     dismiss_reason: "manual_negative_task_cancel",
   };
 
-  await request(`performance_alerts?id=eq.${id}`, {
+  await supabaseRequest(`performance_alerts?id=eq.${id}`, {
     method: "PATCH",
     body: JSON.stringify({
       details,
-      // A future resolved_at intentionally keeps the current incident closed for
-      // the same seven-day suppression window. Existing monitor guards therefore
-      // cannot resurrect it on the next 20-minute check.
       resolved_at: suppressedUntil.toISOString(),
       acknowledged_at: now.toISOString(),
       acknowledged_by: "dashboard:dismiss",
