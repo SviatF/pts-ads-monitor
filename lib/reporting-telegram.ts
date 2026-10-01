@@ -10,7 +10,8 @@ import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
 import { acknowledgePerformanceAlert, resolvePerformanceAlert, addPerformanceAlertNote } from "@/lib/performance-alert-store";
 import { runPerformanceMonitor } from "@/lib/performance-monitor-v4";
 import { sendPerformanceBrief } from "@/lib/performance-brief";
-import { sendDailyPerformanceTasks, sendManagementEscalations, sendRecurringProblemReport, sendWeeklyTeamScorecard } from "@/lib/performance-operations";
+import { sendDailyPerformanceTasks } from "@/lib/performance-tasks-v2";
+import { sendManagementEscalations, sendRecurringProblemReport, sendWeeklyTeamScorecard } from "@/lib/performance-operations";
 
 function commandArgument(text: string, command: string) {
   const match = new RegExp(`^/${command}(?:@\\w+)?(?:\\s+(.+))?$`, "i").exec(text.trim());
