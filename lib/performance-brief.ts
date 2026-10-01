@@ -1,6 +1,7 @@
 import { listPerformanceMonitoringConfigs } from "@/lib/performance-config-store";
 import { escapeTelegramHtml } from "@/lib/invoice-telegram";
 import { sendPerformanceMessage } from "@/lib/performance-telegram";
+import { sendSalesReportingCompleteness } from "@/lib/sales-reporting-completeness";
 
 type AlertRow = {
   id: number;
@@ -83,5 +84,13 @@ export async function sendPerformanceBrief(kind: "morning" | "evening") {
 
   const message = `🌙 <b>PTS PERFORMANCE · END OF DAY</b>\n\nAlerts за 24 год: <b>${alerts.length}</b>\nЗакрито / recovered: <b>${resolved.length}</b>\nЩе відкрито: <b>${open.length}</b>\nБез реакції по actionable alerts: <b>${unack.length}</b>${rows.length ? `\n\n<b>Що лишається на контролі:</b>\n${rows.join("\n")}` : "\n\n✅ На кінець дня відкритих performance-проблем немає."}${digestRows.length ? `\n\n<b>Digest / watch:</b>\n${digestRows.join("\n")}` : ""}`;
   await sendPerformanceMessage(message);
-  return { kind, projects: activeConfigs.length, open: open.length, unacknowledged: unack.length, resolved: resolved.length, digest: digest.length };
+
+  let salesData: Awaited<ReturnType<typeof sendSalesReportingCompleteness>> | null = null;
+  try {
+    salesData = await sendSalesReportingCompleteness();
+  } catch (error) {
+    console.error("Sales reporting completeness check failed", error);
+  }
+
+  return { kind, projects: activeConfigs.length, open: open.length, unacknowledged: unack.length, resolved: resolved.length, digest: digest.length, sales_data: salesData };
 }
