@@ -46,13 +46,18 @@ export default {
     const tasks: Promise<unknown>[] = [callInternal("/api/monitor", env, ctx)];
     const { hour, minute, weekday } = kyivClock();
 
-    // Performance Control runs once per hour. Alert dedupe/cooldown is handled in DB.
-    if (minute < 10) {
+    // Performance Control runs every 20 minutes (HH:00 / HH:20 / HH:40).
+    // We intentionally run the full ruleset for now so fast checks cannot miss
+    // a critical signal that lives deeper in the performance analysis.
+    // Alert dedupe/cooldown is handled in DB, so repeated checks do not spam Telegram.
+    if (minute < 10 || (minute >= 20 && minute < 30) || (minute >= 40 && minute < 50)) {
       tasks.push(callInternal("/api/performance/check", env, ctx));
     }
 
-    // Management escalation: once per hour. Weekend filtering is handled by the endpoint.
-    if (minute >= 20 && minute < 30) {
+    // Management escalation: once per hour, offset from the performance check
+    // so both heavier jobs are not started on the same cron tick.
+    // Weekend filtering is handled by the endpoint.
+    if (minute >= 30 && minute < 40) {
       tasks.push(callInternal("/api/performance/management?kind=escalations", env, ctx));
     }
 
