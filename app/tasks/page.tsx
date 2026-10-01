@@ -35,6 +35,7 @@ export default async function TasksDashboard({ searchParams }: { searchParams: P
   const healthFilter = param(params.health);
   const statusFilter = param(params.status);
   const projectFilter = param(params.project);
+  const dismissedId = param(params.dismissed);
 
   const { alerts, configs, projectNames, owners } = await getPerformanceDashboardData();
   const enabledConfigs = configs.filter((c) => c.enabled);
@@ -142,6 +143,8 @@ export default async function TasksDashboard({ searchParams }: { searchParams: P
           </div>
         </section>
 
+        {dismissedId ? <div className="dismissSuccess">✓ Alert #{dismissedId} скасовано. Поточний incident приховано на 7 днів.</div> : null}
+
         <section className="commandMetrics">
           <div className="commandMetric danger"><span className="commandMetricIcon">!</span><div><small>ПОТРЕБУЮТЬ УВАГИ</small><strong>{open.length}</strong><p>{waiting.length} ще без ACK</p></div></div>
           <div className="commandMetric progress"><span className="commandMetricIcon">↗</span><div><small>В РОБОТІ</small><strong>{inProgress.length}</strong><p>таргетологи вже взяли</p></div></div>
@@ -167,9 +170,20 @@ export default async function TasksDashboard({ searchParams }: { searchParams: P
               {needsAttention.length ? needsAttention.slice(0, 12).map((a) => {
                 const project = projectNames.get(a.meta_account_id) || a.meta_account_id;
                 const owner = owners.get(a.meta_account_id) || "Не призначено";
-                return <Link href={`/tasks/alert/${a.id}`} className={`priorityItem ${a.severity === "critical" ? "criticalTask" : "actionTask"}`} key={a.id} style={{ textDecoration: "none" }}>
-                  <div className="priorityRail" /><div className="priorityMain"><div className="priorityTop"><strong>{project}</strong><span className={a.severity === "critical" ? "bad" : "warn"}>{a.severity === "critical" ? "CRITICAL" : "ACTION"}</span></div><div className="priorityTitle">{a.title}</div><div className="priorityMeta"><span>{owner}</span><span>Alert #{a.id}</span><span>{age(a.last_seen_at)}</span></div></div><div className={`taskState ${a.acknowledged_at ? "stateProgress" : "stateWaiting"}`}>{a.acknowledged_at ? "In progress" : "Waiting ACK"}</div>
-                </Link>;
+                return <div className={`priorityItem ${a.severity === "critical" ? "criticalTask" : "actionTask"}`} key={a.id}>
+                  <div className="priorityRail" />
+                  <Link href={`/tasks/alert/${a.id}`} className="priorityMain priorityOpenLink" style={{ textDecoration: "none" }}>
+                    <div className="priorityTop"><strong>{project}</strong><span className={a.severity === "critical" ? "bad" : "warn"}>{a.severity === "critical" ? "CRITICAL" : "ACTION"}</span></div>
+                    <div className="priorityTitle">{a.title}</div>
+                    <div className="priorityMeta"><span>{owner}</span><span>Alert #{a.id}</span><span>{age(a.last_seen_at)}</span></div>
+                  </Link>
+                  <div className="priorityActions">
+                    <div className={`taskState ${a.acknowledged_at ? "stateProgress" : "stateWaiting"}`}>{a.acknowledged_at ? "In progress" : "Waiting ACK"}</div>
+                    <form action={`/api/performance/alerts/${a.id}/dismiss`} method="post">
+                      <button type="submit" className="dismissTaskButton" title="Закрити цей incident і не показувати його 7 днів">× Скасувати</button>
+                    </form>
+                  </div>
+                </div>;
               }) : <div className="zeroState"><span>✓</span><strong>Черга порожня</strong><p>За вибраними фільтрами задач немає.</p></div>}
             </div>
           </div>
