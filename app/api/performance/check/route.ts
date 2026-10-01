@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runPerformanceMonitor } from "@/lib/performance-monitor-v4";
+import { notifyConfirmedWinnerCreatives } from "@/lib/performance-positive-notifier";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,13 @@ export async function GET(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const result = await runPerformanceMonitor();
-    return NextResponse.json({ ok: true, ...result });
+    let winners = { sent: 0 };
+    try {
+      winners = await notifyConfirmedWinnerCreatives();
+    } catch (error) {
+      console.error("Winner creative notifier failed", error);
+    }
+    return NextResponse.json({ ok: true, ...result, winner_notifications: winners.sent });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
