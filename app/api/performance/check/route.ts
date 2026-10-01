@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runPerformanceMonitor } from "@/lib/performance-monitor-v3";
+import { runPerformanceMonitor } from "@/lib/performance-monitor-v4";
 
 export const dynamic = "force-dynamic";
 
