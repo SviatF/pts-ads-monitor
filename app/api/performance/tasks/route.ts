@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendDailyPerformanceTasks, sendUnfinishedTaskReminder } from "@/lib/performance-operations";
+import { sendDailyPerformanceTasks, sendUnfinishedTaskReminder } from "@/lib/performance-tasks-v2";
 
 export const dynamic = "force-dynamic";
 
