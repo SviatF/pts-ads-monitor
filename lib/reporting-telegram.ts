@@ -8,7 +8,7 @@ import {
 } from "@/lib/reporting-telegram-store";
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
 import { acknowledgePerformanceAlert, resolvePerformanceAlert, addPerformanceAlertNote } from "@/lib/performance-alert-store";
-import { runPerformanceMonitor } from "@/lib/performance-monitor";
+import { runPerformanceMonitor } from "@/lib/performance-monitor-v4";
 import { sendPerformanceBrief } from "@/lib/performance-brief";
 import { sendDailyPerformanceTasks, sendManagementEscalations, sendRecurringProblemReport, sendWeeklyTeamScorecard } from "@/lib/performance-operations";
 
