@@ -25,11 +25,6 @@ function isBlank(value: unknown) {
   return value == null || String(value).trim() === "";
 }
 
-function numeric(value: unknown) {
-  const n = Number(value || 0);
-  return Number.isFinite(n) ? n : 0;
-}
-
 async function readTodayRows(spreadsheetId: string, range: string, token: string) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
@@ -61,15 +56,15 @@ export async function sendSalesReportingCompleteness() {
   const errors: string[] = [];
 
   // Manual sales/manager fields: B, G, H, J, L, M, O.
+  // Numeric zero counts as filled; only truly empty cells are treated as missing.
   const manualIndexes = [1, 6, 7, 9, 11, 12, 14];
 
   for (const config of configs) {
     try {
       const rows = await readTodayRows(config.report_file_id, range, token);
-      const activeRows = rows.filter((row) => numeric(row[2]) > 0 || numeric(row[4]) > 0);
-      if (!activeRows.length) continue;
-
-      const hasAnyManualSalesData = activeRows.some((row) => manualIndexes.some((index) => !isBlank(row[index])));
+      const sourceRows = rows.filter((row) => !isBlank(row[0]));
+      const rowsToCheck = sourceRows.length ? sourceRows : rows;
+      const hasAnyManualSalesData = rowsToCheck.some((row) => manualIndexes.some((index) => !isBlank(row[index])));
       if (!hasAnyManualSalesData) missing.push(config.project_name);
     } catch (error) {
       errors.push(`${config.project_name}: ${error instanceof Error ? error.message : String(error)}`);
@@ -83,7 +78,7 @@ export async function sendSalesReportingCompleteness() {
       missing.map((project) => `• <b>${escapeTelegramHtml(project)}</b>`).join("\n")
     );
   } else if (!errors.length) {
-    await sendPerformanceMessage("✅ <b>SALES DATA</b> · по активних звітах дані від відділу продажів заповнені.");
+    await sendPerformanceMessage("✅ <b>SALES DATA</b> · по всіх активних звітах дані від відділу продажів заповнені.");
   }
 
   return { checked: configs.length, missing: missing.length, projects: missing, errors };
