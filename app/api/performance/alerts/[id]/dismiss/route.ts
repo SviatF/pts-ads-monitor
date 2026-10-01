@@ -58,10 +58,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     method: "PATCH",
     body: JSON.stringify({
       details,
-      resolved_at: now.toISOString(),
+      // A future resolved_at intentionally keeps the current incident closed for
+      // the same seven-day suppression window. Existing monitor guards therefore
+      // cannot resurrect it on the next 20-minute check.
+      resolved_at: suppressedUntil.toISOString(),
       acknowledged_at: now.toISOString(),
       acknowledged_by: "dashboard:dismiss",
-      // Keep automated push logic quiet during the suppression window as well.
       last_notified_at: suppressedUntil.toISOString(),
       updated_at: now.toISOString(),
     }),
