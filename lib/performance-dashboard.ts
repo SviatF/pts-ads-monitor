@@ -35,8 +35,15 @@ async function request<T>(path: string): Promise<T> {
 
 const SUPPRESSED = new Set(["CAMPAIGN_WASTE", "A_LEAD_DROP"]);
 
+export function isDashboardDismissed(alert: DashboardAlert) {
+  const until = String(alert.details?.dismissed_until || "");
+  if (!until) return false;
+  const ts = new Date(until).getTime();
+  return Number.isFinite(ts) && ts > Date.now();
+}
+
 export function healthForAlerts(alerts: DashboardAlert[]) {
-  const open = alerts.filter((a) => !a.resolved_at && !SUPPRESSED.has(a.alert_type));
+  const open = alerts.filter((a) => !a.resolved_at && !SUPPRESSED.has(a.alert_type) && !isDashboardDismissed(a));
   if (open.some((a) => a.severity === "critical")) return "critical" as const;
   if (open.some((a) => a.severity === "action_required")) return "action" as const;
   if (open.some((a) => a.severity === "warning")) return "watch" as const;
@@ -49,7 +56,7 @@ export async function getPerformanceDashboardData() {
     request<DashboardAlert[]>(`performance_alerts?select=*&or=(resolved_at.is.null,first_seen_at.gte.${encodeURIComponent(since)})&order=last_seen_at.desc&limit=1000`),
     listPerformanceMonitoringConfigs(),
   ]);
-  const alerts = alertsRaw.filter((a) => !SUPPRESSED.has(a.alert_type));
+  const alerts = alertsRaw.filter((a) => !SUPPRESSED.has(a.alert_type) && !isDashboardDismissed(a));
   const projectNames = new Map(configs.map((c) => [c.meta_account_id, c.project_name]));
   const owners = new Map(configs.map((c) => [c.meta_account_id, c.targetologist_telegram || ""]));
   return { alerts, configs, projectNames, owners };
@@ -61,7 +68,7 @@ export async function getPerformanceAlertById(id: number) {
     listPerformanceMonitoringConfigs(),
   ]);
   const alert = rows[0];
-  if (!alert || SUPPRESSED.has(alert.alert_type)) return null;
+  if (!alert || SUPPRESSED.has(alert.alert_type) || isDashboardDismissed(alert)) return null;
   const config = configs.find((item) => item.meta_account_id === alert.meta_account_id) || null;
   return { alert, config };
 }
@@ -72,7 +79,7 @@ export async function getPerformanceProjectData(metaAccountId: string, days = 30
     request<DashboardAlert[]>(`performance_alerts?select=*&meta_account_id=eq.${encodeURIComponent(metaAccountId)}&first_seen_at=gte.${encodeURIComponent(since)}&order=first_seen_at.desc&limit=1000`),
     listPerformanceMonitoringConfigs(),
   ]);
-  const alerts = alertsRaw.filter((a) => !SUPPRESSED.has(a.alert_type));
+  const alerts = alertsRaw.filter((a) => !SUPPRESSED.has(a.alert_type) && !isDashboardDismissed(a));
   const config = configs.find((item) => item.meta_account_id === metaAccountId) || null;
   return { alerts, config };
 }
