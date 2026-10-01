@@ -7,9 +7,43 @@ import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
 
 export const dynamic = "force-dynamic";
 
+const PROJECT_PACING_MS = 6000;
+const RATE_LIMIT_RETRY_MS = 65000;
+
 function authorized(request: Request) {
   const secret = process.env.CRON_SECRET;
   return Boolean(secret && request.headers.get("authorization") === `Bearer ${secret}`);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isGoogleSheetsRateLimit(error: unknown) {
+  const message = errorMessage(error).toLowerCase();
+  return (
+    message.includes("google api failed (429)") ||
+    message.includes("resource_exhausted") ||
+    message.includes("rate_limit_exceeded") ||
+    message.includes("read requests per minute per user") ||
+    message.includes("quota exceeded for quota metric 'read requests'")
+  );
+}
+
+async function withSheetsRateLimitRetry<T>(label: string, operation: () => Promise<T>) {
+  try {
+    return { value: await operation(), retried: false };
+  } catch (error) {
+    if (!isGoogleSheetsRateLimit(error)) throw error;
+
+    console.warn(`[Reporting] Google Sheets quota reached for ${label}. Retrying in ${RATE_LIMIT_RETRY_MS / 1000}s.`);
+    await sleep(RATE_LIMIT_RETRY_MS);
+    return { value: await operation(), retried: true };
+  }
 }
 
 function kyivDateIso(now = new Date()) {
@@ -51,23 +85,38 @@ export async function GET(request: Request) {
   const adminChatId = process.env.TELEGRAM_CHAT_ID;
   const configs = (await listReportingConfigs()).filter((item) => item.status === "configured");
   const results: Array<Record<string, unknown>> = [];
+  const unrecoveredQuotaProjects: string[] = [];
+  let quotaRetries = 0;
 
-  for (const config of configs) {
+  for (let index = 0; index < configs.length; index += 1) {
+    const config = configs[index];
+
+    // Keep all reporting projects under the per-user Sheets read quota instead of
+    // bursting several spreadsheets through the same service account in one minute.
+    if (index > 0) await sleep(PROJECT_PACING_MS);
+
     try {
-      const lifecycle = await ensureProjectReportLifecycle({
-        spreadsheetId: config.report_file_id,
-        projectName: config.project_name,
-        goalKey: config.goal_key,
-        goalLabel: config.goal_label,
-        reportingStartDate: config.report_start_date,
+      const operation = await withSheetsRateLimitRetry(config.project_name, async () => {
+        const lifecycle = await ensureProjectReportLifecycle({
+          spreadsheetId: config.report_file_id,
+          projectName: config.project_name,
+          goalKey: config.goal_key,
+          goalLabel: config.goal_label,
+          reportingStartDate: config.report_start_date,
+        });
+
+        const sync = await syncMetaReporting({
+          accountId: config.meta_account_id,
+          spreadsheetId: config.report_file_id,
+          since: date,
+          until: date,
+        });
+
+        return { lifecycle, sync };
       });
 
-      const sync = await syncMetaReporting({
-        accountId: config.meta_account_id,
-        spreadsheetId: config.report_file_id,
-        since: date,
-        until: date,
-      });
+      if (operation.retried) quotaRetries += 1;
+      const { lifecycle, sync } = operation.value;
 
       const subscriptions = await listReportingTelegramSubscriptionsForAccount(config.meta_account_id);
       const createdText = lifecycle.created.length
@@ -92,15 +141,39 @@ export async function GET(request: Request) {
         leads: sync.mappedLeads,
         spend: sync.mappedSpend,
         chatsNotified: subscriptions.length,
+        quotaRetried: operation.retried,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      results.push({ accountId: config.meta_account_id, project: config.project_name, date, error: message });
-      if (adminChatId) {
+      const message = errorMessage(error);
+      const quotaError = isGoogleSheetsRateLimit(error);
+      results.push({ accountId: config.meta_account_id, project: config.project_name, date, error: message, quotaError });
+
+      if (quotaError) {
+        unrecoveredQuotaProjects.push(config.project_name);
+      } else if (adminChatId) {
         await notify(adminChatId, `❌ <b>PTS Reporting morning sync failed</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\n<code>${escapeTelegramHtml(message)}</code>`);
       }
     }
   }
 
-  return NextResponse.json({ ok: true, date, projects: results.length, results });
+  if (adminChatId && unrecoveredQuotaProjects.length) {
+    await notify(
+      adminChatId,
+      `⚠️ <b>PTS Reporting · Google Sheets quota</b>\n\nПісля автоматичного retry не вдалося завершити: <b>${unrecoveredQuotaProjects.length}</b>\n${unrecoveredQuotaProjects.map((name) => `• ${escapeTelegramHtml(name)}`).join("\n")}\n\nСистема вже робить pacing між проєктами та автоматично чекає скидання minute quota перед повторною спробою.`,
+    );
+  } else if (adminChatId && quotaRetries > 0) {
+    await notify(
+      adminChatId,
+      `✅ <b>PTS Reporting · quota auto-recovery</b>\n\nGoogle Sheets rate limit спрацював <b>${quotaRetries}</b> раз(и), але всі affected проєкти успішно дозаповнені після автоматичного retry.`,
+    );
+  }
+
+  return NextResponse.json({
+    ok: unrecoveredQuotaProjects.length === 0,
+    date,
+    projects: results.length,
+    quotaRetries,
+    unrecoveredQuotaProjects: unrecoveredQuotaProjects.length,
+    results,
+  });
 }
