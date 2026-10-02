@@ -109,7 +109,7 @@ export default async function TasksDashboard({ searchParams }: { searchParams: P
       <div className="brandBlock"><div className="brandMark">//</div><div><strong>PTS</strong><span>COOPERATION</span></div></div>
       <nav className="sideNav">
         <Link href="/" className="sideNavItem"><span>⌂</span>Overview</Link>
-        <Link href="/tasks" className="sideNavItem active"><span>⚡</span>Performance OS</Link>
+        <Link href="/tasks" className="sideNavItem active"><span>⚡</span>Performance OS</Link>\n        <Link href="/task-manager" className="sideNavItem"><span>✓</span>Task Manager</Link>
         <Link href="/#accounts" className="sideNavItem"><span>◉</span>Accounts</Link>
         <Link href="/#reporting" className="sideNavItem"><span>▥</span>Reporting</Link>
         <Link href="/diagnostics" className="sideNavItem"><span>⌁</span>Diagnostics</Link>
