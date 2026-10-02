@@ -36,6 +36,9 @@ export type PersonalTask = {
   next_followup_at: string | null;
   last_followup_at: string | null;
   last_schedule_push_key: string | null;
+  activity_chat_id: string | null;
+  activity_message_id: number | null;
+  activity_last_synced_at: string | null;
   reminded_2h_at: string | null;
   reminded_due_at: string | null;
   reminded_overdue_at: string | null;
