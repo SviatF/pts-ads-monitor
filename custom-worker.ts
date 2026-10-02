@@ -43,7 +43,12 @@ export default {
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     hydrateProcessEnv(env);
-    const tasks: Promise<unknown>[] = [callInternal("/api/monitor", env, ctx)];
+    const tasks: Promise<unknown>[] = [
+      callInternal("/api/monitor", env, ctx),
+      // Personal PTS Tasks bot: deadlines + morning/evening direct-message digests.
+      // Cron already runs every 10 minutes, which is enough precision for task reminders.
+      callInternal("/api/tasks-bot/reminders", env, ctx),
+    ];
     const { hour, minute, weekday } = kyivClock();
 
     // Performance Control runs every 20 minutes (HH:00 / HH:20 / HH:40).
