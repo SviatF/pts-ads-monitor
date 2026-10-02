@@ -135,15 +135,15 @@ async function sendGroupedTasks(chatId: string, grouped: Map<string, AlertRow[]>
     const lines = rows.map((alert, index) => {
       const project = configNames.get(alert.meta_account_id) || alert.meta_account_id;
       const status = alert.acknowledged_at ? "✅ вже в роботі" : "⏳ ще не взято";
-      return `${index + 1}. ${severityIcon(alert)} <b>${escapeTelegramHtml(project)}</b>\n   ${escapeTelegramHtml(alert.title)} · ${status}\n   Alert #<code>${alert.id}</code>${alert.acknowledged_at ? ` · завершити: <code>/perf_done ${alert.id}</code>` : ` · взяти: <code>/perf_ack ${alert.id}</code>`}`;
+      return `${index + 1}. ${severityIcon(alert)} <b>${escapeTelegramHtml(project)}</b>\n   ${escapeTelegramHtml(alert.title)} · ${status}\n   Alert #<code>${alert.id}</code> · закриття у персональному <b>PTS Tasks</b>`;
     });
     const mention = owner === "__unassigned__" ? "⚠️ <b>Без призначеного таргетолога</b>" : `<b>${cleanUsername(owner)}</b>`;
     const heading = reminder ? "Ще залишилось на сьогодні:" : weekend ? "На контролі у вихідний:" : "Задачі по кабінетах на сьогодні:";
     const footer = reminder
-      ? "Якщо задача вже вирішена — закрийте її командою <code>/perf_done ID</code>."
+      ? "Якщо задача вже вирішена — відкрийте персональний <b>PTS Tasks</b> і натисніть «✅ Виконано»."
       : weekend
-        ? "Як буде зручно — перегляньте. Якщо взяли в роботу: <code>/perf_ack ID</code>, після виконання: <code>/perf_done ID</code>."
-        : "Після виконання закрийте задачу командою <code>/perf_done ID</code>. Якщо хочете зафіксувати, що саме зробили: <code>/perf_note ID текст</code>.";
+        ? "Як буде зручно — перегляньте у персональному <b>PTS Tasks</b>. Закриття задачі робимо тільки там."
+        : "Усі ці задачі вже підтягуються в персональний <b>PTS Tasks</b>. Після виконання натисніть там «✅ Виконано» — alert закриється автоматично.";
     await sendTelegramToChat(chatId, `👤 ${mention}\n\n<b>${heading}</b>\n\n${lines.join("\n\n")}\n\n${footer}`);
   }
 }
@@ -189,7 +189,7 @@ export async function sendUnfinishedTaskReminder() {
   if (!alerts.length) return { tasks: 0, targetologists: 0 };
 
   const grouped = groupTasks(alerts, configs);
-  await sendTelegramToChat(chatId, "👀 <b>ДЕННИЙ CHECK-IN</b>\n\nНагадую тільки про те, що ще не закрито. Якщо вже вирішили — просто поставте <code>/perf_done ID</code>, і я перестану переслідувати вас цією задачею 😄");
+  await sendTelegramToChat(chatId, "👀 <b>ДЕННИЙ CHECK-IN</b>\n\nНагадую тільки про те, що ще не закрито. Виконані задачі закриваємо у персональному <b>PTS Tasks</b> кнопкою «✅ Виконано» 😄");
   await sendGroupedTasks(chatId, grouped, configs, false, true);
   return { tasks: alerts.length, targetologists: grouped.size };
 }
