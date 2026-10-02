@@ -199,11 +199,17 @@ async function sendActionable(config: EffectiveConfig, input: { key: string; typ
   if (existing?.resolved_at && Date.now() - new Date(existing.resolved_at).getTime() < MANUAL_CLOSE_GRACE_MS) return 0;
   const last = existing?.last_notified_at ? new Date(existing.last_notified_at).getTime() : 0;
   if (last && Date.now() - last < 12 * 60 * 60 * 1000) {
-    await saveSignal({ metaAccountId: config.meta_account_id, alertKey: input.key, alertType: input.type, severity: input.severity, title: input.title, details: input.details, notify: false });
+    const saved = await saveSignal({ metaAccountId: config.meta_account_id, alertKey: input.key, alertType: input.type, severity: input.severity, title: input.title, details: input.details, notify: false });
+    if (!saved.blocked) {
+      try { await ensurePerformanceAlertPersonalTask(config, saved.alert); } catch (error) { console.warn("Could not sync performance alert to personal tasks", error); }
+    }
     return 0;
   }
   if (!input.emergency && await pushesToday(config.meta_account_id) >= MAX_PUSHES_PER_ACCOUNT_DAY) {
-    await saveSignal({ metaAccountId: config.meta_account_id, alertKey: input.key, alertType: input.type, severity: input.severity, title: input.title, details: { ...input.details, push_suppressed: "daily_cap" }, notify: false });
+    const saved = await saveSignal({ metaAccountId: config.meta_account_id, alertKey: input.key, alertType: input.type, severity: input.severity, title: input.title, details: { ...input.details, push_suppressed: "daily_cap" }, notify: false });
+    if (!saved.blocked) {
+      try { await ensurePerformanceAlertPersonalTask(config, saved.alert); } catch (error) { console.warn("Could not sync performance alert to personal tasks", error); }
+    }
     return 0;
   }
   const saved = await saveSignal({ metaAccountId: config.meta_account_id, alertKey: input.key, alertType: input.type, severity: input.severity, title: input.title, details: input.details, notify: true });
