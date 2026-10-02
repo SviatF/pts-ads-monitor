@@ -30,6 +30,7 @@ import {
 import { listPerformanceMonitoringConfigs } from "@/lib/performance-config-store";
 import { syncOpenPerformanceTasksForUser } from "@/lib/performance-personal-task-sync";
 import { acknowledgePerformanceAlert, resolvePerformanceAlert } from "@/lib/performance-alert-store";
+import { publishTaskActivity, syncTaskActivity } from "@/lib/tasks-activity-channel";
 
 type TelegramUser = {
   id: number;
@@ -287,6 +288,11 @@ async function finishTaskCreation(chatId: number, userId: number, payload: Recor
   });
 
   if (task && ownerUserId !== userId && assignee) {
+    try {
+      await publishTaskActivity(task);
+    } catch (error) {
+      console.warn("Could not publish task to activity channel", error);
+    }
     await sendTasksBotMessage({
       chatId: assignee.telegram_chat_id,
       text:
@@ -520,12 +526,15 @@ async function handleCallback(query: TelegramCallbackQuery) {
     if (task.performance_alert_id) {
       await acknowledgePerformanceAlert(task.performance_alert_id, `tasks-bot:${userId}`);
     }
-    await updatePersonalTask(taskId, userId, {
+    const updatedTask = await updatePersonalTask(taskId, userId, {
       work_state: "in_progress",
       started_at: task.started_at || now.toISOString(),
       next_followup_at: nextFollowupAt,
       last_followup_at: null,
     });
+    if (updatedTask) {
+      try { await syncTaskActivity(updatedTask); } catch (error) { console.warn("Could not sync task activity status", error); }
+    }
     await answerTasksBotCallback(query.id, "Взято у роботу 👀");
     await sendTasksBotMessage({
       chatId,
@@ -543,11 +552,14 @@ async function handleCallback(query: TelegramCallbackQuery) {
     const user = await getTaskBotUser(userId);
     const timezone = user?.timezone || "Europe/Kyiv";
     const nextFollowupAt = nextWorkingFollowupIso(timezone);
-    await updatePersonalTask(taskId, userId, {
+    const updatedTask = await updatePersonalTask(taskId, userId, {
       work_state: "in_progress",
       last_followup_at: new Date().toISOString(),
       next_followup_at: nextFollowupAt,
     });
+    if (updatedTask) {
+      try { await syncTaskActivity(updatedTask); } catch (error) { console.warn("Could not sync task activity status", error); }
+    }
     await answerTasksBotCallback(query.id, "Ок, не відволікаю 🔄");
     await sendTasksBotMessage({
       chatId,
@@ -563,12 +575,15 @@ async function handleCallback(query: TelegramCallbackQuery) {
     if (task.performance_alert_id) {
       await resolvePerformanceAlert(task.performance_alert_id, `tasks-bot:${userId}`);
     }
-    await updatePersonalTask(taskId, userId, {
+    const updatedTask = await updatePersonalTask(taskId, userId, {
       status: "completed",
       completed_at: new Date().toISOString(),
       next_followup_at: null,
       last_followup_at: new Date().toISOString(),
     });
+    if (updatedTask) {
+      try { await syncTaskActivity(updatedTask); } catch (error) { console.warn("Could not sync task activity completion", error); }
+    }
     await answerTasksBotCallback(query.id, "Готово ✅");
     await sendTasksBotMessage({
       chatId,
@@ -581,11 +596,14 @@ async function handleCallback(query: TelegramCallbackQuery) {
   }
 
   if (action === "cancel") {
-    await updatePersonalTask(taskId, userId, {
+    const updatedTask = await updatePersonalTask(taskId, userId, {
       status: "cancelled",
       cancelled_at: new Date().toISOString(),
       next_followup_at: null,
     });
+    if (updatedTask) {
+      try { await syncTaskActivity(updatedTask); } catch (error) { console.warn("Could not sync task activity cancellation", error); }
+    }
     await answerTasksBotCallback(query.id, "Скасовано");
     await sendTasksBotMessage({ chatId, text: `🗑 Скасовано: <b>${escapeTelegramHtml(task.title)}</b>`, replyMarkup: tasksBotMainKeyboard });
     return;
@@ -595,7 +613,7 @@ async function handleCallback(query: TelegramCallbackQuery) {
     const minutes = Math.max(15, Number(match[3] || 60));
     const base = task.due_at ? Math.max(Date.now(), new Date(task.due_at).getTime()) : Date.now();
     const dueAt = new Date(base + minutes * 60_000).toISOString();
-    await updatePersonalTask(taskId, userId, {
+    const updatedTask = await updatePersonalTask(taskId, userId, {
       due_at: dueAt,
       work_state: "new",
       started_at: null,
@@ -605,6 +623,9 @@ async function handleCallback(query: TelegramCallbackQuery) {
       reminded_due_at: null,
       reminded_overdue_at: null,
     });
+    if (updatedTask) {
+      try { await syncTaskActivity(updatedTask); } catch (error) { console.warn("Could not sync task activity deadline", error); }
+    }
     await answerTasksBotCallback(query.id, `Перенесено на +${minutes} хв`);
     await sendTasksBotMessage({ chatId, text: `⏰ <b>${escapeTelegramHtml(task.title)}</b> → ${escapeTelegramHtml(taskDueLabel(dueAt))}`, replyMarkup: taskActionKeyboard(taskId, task.performance_alert_id, task.work_state) });
     return;
@@ -625,7 +646,7 @@ async function handleCallback(query: TelegramCallbackQuery) {
       hour: Number(clock.hour || 10),
       minute: Number(clock.minute || 0),
     });
-    await updatePersonalTask(taskId, userId, {
+    const updatedTask = await updatePersonalTask(taskId, userId, {
       due_at: dueAt,
       work_state: "new",
       started_at: null,
@@ -635,6 +656,9 @@ async function handleCallback(query: TelegramCallbackQuery) {
       reminded_due_at: null,
       reminded_overdue_at: null,
     });
+    if (updatedTask) {
+      try { await syncTaskActivity(updatedTask); } catch (error) { console.warn("Could not sync task activity deadline", error); }
+    }
     await answerTasksBotCallback(query.id, "Перенесено на завтра");
     await sendTasksBotMessage({ chatId, text: `📅 <b>${escapeTelegramHtml(task.title)}</b> → завтра, ${escapeTelegramHtml(taskDueLabel(dueAt))}`, replyMarkup: taskActionKeyboard(taskId, task.performance_alert_id, task.work_state) });
   }
