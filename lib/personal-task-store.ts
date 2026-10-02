@@ -26,11 +26,16 @@ export type PersonalTask = {
   notes: string | null;
   priority: "high" | "normal" | "low";
   status: "active" | "completed" | "cancelled";
+  work_state: "new" | "in_progress";
   due_at: string | null;
   recurrence_rule: string | null;
   source_type: "self" | "performance" | "manager" | "team";
   performance_alert_id: number | null;
   assigned_by_label: string | null;
+  started_at: string | null;
+  next_followup_at: string | null;
+  last_followup_at: string | null;
+  last_schedule_push_key: string | null;
   reminded_2h_at: string | null;
   reminded_due_at: string | null;
   reminded_overdue_at: string | null;
@@ -163,6 +168,7 @@ export async function createPersonalTask(input: {
       notes: input.notes || null,
       priority: input.priority || "normal",
       status: "active",
+      work_state: "new",
       due_at: input.dueAt || null,
       source_type: input.sourceType || "self",
       performance_alert_id: input.performanceAlertId || null,
@@ -200,6 +206,18 @@ export async function listPersonalTasks(input: {
   const limit = Math.max(1, Math.min(50, input.limit || 20));
   return request<PersonalTask[]>(
     `personal_tasks?select=*&owner_telegram_user_id=eq.${input.ownerTelegramUserId}&status=eq.${status}&order=due_at.asc.nullslast,created_at.desc&limit=${limit}`
+  );
+}
+
+export async function listActiveTasksForUser(ownerTelegramUserId: number, limit = 100) {
+  return request<PersonalTask[]>(
+    `personal_tasks?select=*&owner_telegram_user_id=eq.${ownerTelegramUserId}&status=eq.active&order=due_at.asc.nullslast,created_at.asc&limit=${Math.max(1, Math.min(200, limit))}`
+  );
+}
+
+export async function listActiveTasksForFollowup(iso: string) {
+  return request<PersonalTask[]>(
+    `personal_tasks?select=*&status=eq.active&work_state=eq.in_progress&next_followup_at=not.is.null&next_followup_at=lte.${encodeURIComponent(iso)}&order=next_followup_at.asc&limit=500`
   );
 }
 
