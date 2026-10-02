@@ -71,7 +71,7 @@ export async function ensurePerformanceAlertPersonalTask(
         `Задача: <b>${escapeTelegramHtml(alert.title)}</b>\n` +
         `👉 ${escapeTelegramHtml(actionHint(alert.alert_type))}\n\n` +
         `Alert #<code>${alert.id}</code> · закривається тут, без /perf_done.`,
-      replyMarkup: taskActionKeyboard(task.id),
+      replyMarkup: taskActionKeyboard(task.id, alert.id),
     });
   }
 
