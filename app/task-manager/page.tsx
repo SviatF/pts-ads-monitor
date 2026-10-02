@@ -23,6 +23,13 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "U";
 }
 
+function sourceLabel(source: string) {
+  if (source === "performance") return "Performance OS";
+  if (source === "manager") return "Керівник";
+  if (source === "team") return "Команда";
+  return "Особиста";
+}
+
 function sessionLabel(state: string) {
   const map: Record<string, string> = {
     await_title: "створює задачу · назва",
@@ -122,7 +129,7 @@ export default async function TaskManagerDashboard() {
                         {active.length ? active.slice(0, 8).map((task) => (
                           <div className={`tmTaskRow ${overdueIds.has(task.id) ? "overdue" : ""}`} key={task.id}>
                             <span className={`tmTaskPriority ${task.priority}`} />
-                            <div className="tmTaskMain"><strong>{task.title}</strong><small>{task.project_name || "Без проєкту"} · Task #{task.id}</small></div>
+                            <div className="tmTaskMain"><strong>{task.title}</strong><small>{task.project_name || "Без проєкту"} · {sourceLabel(task.source_type)} · Task #{task.id}</small></div>
                             <div className={`tmDue ${overdueIds.has(task.id) ? "bad" : ""}`}>{overdueIds.has(task.id) ? "OVERDUE · " : ""}{formatDate(task.due_at, user.timezone)}</div>
                           </div>
                         )) : <div className="tmEmpty">Активних задач немає.</div>}
@@ -142,12 +149,12 @@ export default async function TaskManagerDashboard() {
 
           <section className="panel tmActivityPanel">
             <div className="panelHead"><div><strong>Остання активність задачника</strong><div className="eyebrow panelSub">Створення · зміни · виконання · скасування</div></div><span className="statusPill violetPill">LIVE</span></div>
-            {recentActivity.length ? <div className="tableWrap"><table className="tmActivityTable"><thead><tr><th>User</th><th>Task</th><th>Project</th><th>Status</th><th>Deadline</th><th>Updated</th></tr></thead><tbody>
+            {recentActivity.length ? <div className="tableWrap"><table className="tmActivityTable"><thead><tr><th>User</th><th>Task</th><th>Project</th><th>Source</th><th>Status</th><th>Deadline</th><th>Updated</th></tr></thead><tbody>
               {recentActivity.map((task) => {
                 const row = users.find((item) => item.user.telegram_user_id === task.owner_telegram_user_id);
                 const userName = row ? displayName(row.user) : String(task.owner_telegram_user_id);
                 const timezone = row?.user.timezone || "Europe/Kyiv";
-                return <tr key={task.id}><td><strong>{userName}</strong></td><td>{task.title}</td><td>{task.project_name || "—"}</td><td><span className={`tmStatusTag ${task.status}`}>{task.status}</span></td><td>{formatDate(task.due_at, timezone)}</td><td>{formatDate(task.updated_at, timezone)}</td></tr>;
+                return <tr key={task.id}><td><strong>{userName}</strong></td><td>{task.title}</td><td>{task.project_name || "—"}</td><td>{sourceLabel(task.source_type)}</td><td><span className={`tmStatusTag ${task.status}`}>{task.status}</span></td><td>{formatDate(task.due_at, timezone)}</td><td>{formatDate(task.updated_at, timezone)}</td></tr>;
               })}
             </tbody></table></div> : <div className="empty">Активності ще немає.</div>}
           </section>
