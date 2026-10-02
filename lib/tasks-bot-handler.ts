@@ -23,6 +23,7 @@ import {
   priorityLabel,
   sendTasksBotMessage,
   taskActionKeyboard,
+  taskFollowupKeyboard,
   tasksBotMainKeyboard,
   type TasksBotReplyMarkup,
 } from "@/lib/tasks-bot-telegram";
@@ -192,7 +193,7 @@ async function showTaskList(chatId: number, userId: number, mode: "active" | "to
     await sendTasksBotMessage({
       chatId,
       text: taskCard(task, timezone),
-      replyMarkup: mode === "completed" ? undefined : taskActionKeyboard(task.id, task.performance_alert_id),
+      replyMarkup: mode === "completed" ? undefined : taskActionKeyboard(task.id, task.performance_alert_id, task.work_state),
     });
   }
   if (filtered.length > 15) {
@@ -416,6 +417,47 @@ async function handleCreateSession(chatId: number, userId: number, text: string)
   return false;
 }
 
+function nextWorkingFollowupIso(timezone = "Europe/Kyiv") {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const hour = Number(map.hour || 0);
+  const minute = Number(map.minute || 0);
+
+  if (hour < 16) return new Date(now.getTime() + 3 * 60 * 60 * 1000).toISOString();
+
+  if (hour < 19) {
+    return localDateTimeToIso({
+      year: Number(map.year),
+      month: Number(map.month),
+      day: Number(map.day),
+      hour: 19,
+      minute: 0,
+      timezone,
+    });
+  }
+
+  const date = new Date(Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day)));
+  do { date.setUTCDate(date.getUTCDate() + 1); } while ([0, 6].includes(date.getUTCDay()));
+  return localDateTimeToIso({
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+    hour: 9,
+    minute: 0,
+    timezone,
+  });
+}
+
 async function handleCallback(query: TelegramCallbackQuery) {
   const data = query.data || "";
   const chatId = query.message?.chat.id;
@@ -458,7 +500,7 @@ async function handleCallback(query: TelegramCallbackQuery) {
     return;
   }
 
-  const match = /^task_(start|done|snooze|tomorrow|cancel):(\d+)(?::(\d+))?$/.exec(data);
+  const match = /^task_(start|working|done|snooze|tomorrow|cancel):(\d+)(?::(\d+))?$/.exec(data);
   if (!match) {
     await answerTasksBotCallback(query.id);
     return;
@@ -481,7 +523,7 @@ async function handleCallback(query: TelegramCallbackQuery) {
       text: task.performance_alert_id
         ? `👀 <b>Взято в роботу.</b> Alert #${task.performance_alert_id} підтверджено.`
         : `👀 <b>Задачу взято в роботу:</b> ${escapeTelegramHtml(task.title)}`,
-      replyMarkup: taskActionKeyboard(task.id, task.performance_alert_id),
+      replyMarkup: taskActionKeyboard(task.id, task.performance_alert_id, task.work_state),
     });
     return;
   }
@@ -493,6 +535,8 @@ async function handleCallback(query: TelegramCallbackQuery) {
     await updatePersonalTask(taskId, userId, {
       status: "completed",
       completed_at: new Date().toISOString(),
+      next_followup_at: null,
+      last_followup_at: new Date().toISOString(),
     });
     await answerTasksBotCallback(query.id, "Готово ✅");
     await sendTasksBotMessage({
@@ -509,6 +553,7 @@ async function handleCallback(query: TelegramCallbackQuery) {
     await updatePersonalTask(taskId, userId, {
       status: "cancelled",
       cancelled_at: new Date().toISOString(),
+      next_followup_at: null,
     });
     await answerTasksBotCallback(query.id, "Скасовано");
     await sendTasksBotMessage({ chatId, text: `🗑 Скасовано: <b>${escapeTelegramHtml(task.title)}</b>`, replyMarkup: tasksBotMainKeyboard });
@@ -521,12 +566,16 @@ async function handleCallback(query: TelegramCallbackQuery) {
     const dueAt = new Date(base + minutes * 60_000).toISOString();
     await updatePersonalTask(taskId, userId, {
       due_at: dueAt,
+      work_state: "new",
+      started_at: null,
+      next_followup_at: null,
+      last_followup_at: null,
       reminded_2h_at: null,
       reminded_due_at: null,
       reminded_overdue_at: null,
     });
     await answerTasksBotCallback(query.id, `Перенесено на +${minutes} хв`);
-    await sendTasksBotMessage({ chatId, text: `⏰ <b>${escapeTelegramHtml(task.title)}</b> → ${escapeTelegramHtml(taskDueLabel(dueAt))}`, replyMarkup: taskActionKeyboard(taskId, task.performance_alert_id) });
+    await sendTasksBotMessage({ chatId, text: `⏰ <b>${escapeTelegramHtml(task.title)}</b> → ${escapeTelegramHtml(taskDueLabel(dueAt))}`, replyMarkup: taskActionKeyboard(taskId, task.performance_alert_id, task.work_state) });
     return;
   }
 
@@ -547,12 +596,16 @@ async function handleCallback(query: TelegramCallbackQuery) {
     });
     await updatePersonalTask(taskId, userId, {
       due_at: dueAt,
+      work_state: "new",
+      started_at: null,
+      next_followup_at: null,
+      last_followup_at: null,
       reminded_2h_at: null,
       reminded_due_at: null,
       reminded_overdue_at: null,
     });
     await answerTasksBotCallback(query.id, "Перенесено на завтра");
-    await sendTasksBotMessage({ chatId, text: `📅 <b>${escapeTelegramHtml(task.title)}</b> → завтра, ${escapeTelegramHtml(taskDueLabel(dueAt))}`, replyMarkup: taskActionKeyboard(taskId, task.performance_alert_id) });
+    await sendTasksBotMessage({ chatId, text: `📅 <b>${escapeTelegramHtml(task.title)}</b> → завтра, ${escapeTelegramHtml(taskDueLabel(dueAt))}`, replyMarkup: taskActionKeyboard(taskId, task.performance_alert_id, task.work_state) });
   }
 }
 
