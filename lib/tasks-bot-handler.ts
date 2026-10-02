@@ -514,16 +514,47 @@ async function handleCallback(query: TelegramCallbackQuery) {
   }
 
   if (action === "start") {
+    const user = await getTaskBotUser(userId);
+    const now = new Date();
+    const nextFollowupAt = new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
     if (task.performance_alert_id) {
       await acknowledgePerformanceAlert(task.performance_alert_id, `tasks-bot:${userId}`);
     }
-    await answerTasksBotCallback(query.id, "Взято в роботу 👀");
+    await updatePersonalTask(taskId, userId, {
+      work_state: "in_progress",
+      started_at: task.started_at || now.toISOString(),
+      next_followup_at: nextFollowupAt,
+      last_followup_at: null,
+    });
+    await answerTasksBotCallback(query.id, "Взято у роботу 👀");
     await sendTasksBotMessage({
       chatId,
-      text: task.performance_alert_id
-        ? `👀 <b>Взято в роботу.</b> Alert #${task.performance_alert_id} підтверджено.`
-        : `👀 <b>Задачу взято в роботу:</b> ${escapeTelegramHtml(task.title)}`,
-      replyMarkup: taskActionKeyboard(task.id, task.performance_alert_id, task.work_state),
+      text:
+        `👀 <b>Задачу взято у роботу.</b>\n\n` +
+        `<b>${escapeTelegramHtml(task.title)}</b>` +
+        (task.performance_alert_id ? `\nAlert #${task.performance_alert_id} підтверджено.` : "") +
+        `\n\nЗвичайні нагадування зупинено. Наступний check-in приблизно через 2 години.`,
+      replyMarkup: taskFollowupKeyboard(task.id, task.performance_alert_id),
+    });
+    return;
+  }
+
+  if (action === "working") {
+    const user = await getTaskBotUser(userId);
+    const timezone = user?.timezone || "Europe/Kyiv";
+    const nextFollowupAt = nextWorkingFollowupIso(timezone);
+    await updatePersonalTask(taskId, userId, {
+      work_state: "in_progress",
+      last_followup_at: new Date().toISOString(),
+      next_followup_at: nextFollowupAt,
+    });
+    await answerTasksBotCallback(query.id, "Ок, не відволікаю 🔄");
+    await sendTasksBotMessage({
+      chatId,
+      text:
+        `🔄 <b>Залишаю задачу в роботі.</b>\n` +
+        `${escapeTelegramHtml(task.title)}\n\nНаступний check-in: ${escapeTelegramHtml(taskDueLabel(nextFollowupAt, timezone))}.`,
+      replyMarkup: taskFollowupKeyboard(task.id, task.performance_alert_id),
     });
     return;
   }
