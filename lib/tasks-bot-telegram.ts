@@ -82,19 +82,22 @@ export function priorityIcon(priority: string) {
   return "🟡";
 }
 
-export function taskActionKeyboard(taskId: number): TasksBotReplyMarkup {
-  return {
-    inline_keyboard: [
-      [
-        { text: "✅ Виконано", callback_data: `task_done:${taskId}` },
-        { text: "⏰ +1 год", callback_data: `task_snooze:${taskId}:60` },
-      ],
-      [
-        { text: "📅 На завтра", callback_data: `task_tomorrow:${taskId}` },
-        { text: "🗑 Скасувати", callback_data: `task_cancel:${taskId}` },
-      ],
+export function taskActionKeyboard(taskId: number, performanceAlertId?: number | null): TasksBotReplyMarkup {
+  const rows: TasksBotInlineButton[][] = [];
+  if (performanceAlertId) {
+    rows.push([{ text: "👀 Взяти в роботу", callback_data: `task_start:${taskId}` }]);
+  }
+  rows.push(
+    [
+      { text: "✅ Виконано", callback_data: `task_done:${taskId}` },
+      { text: "⏰ +1 год", callback_data: `task_snooze:${taskId}:60` },
     ],
-  };
+    [
+      { text: "📅 На завтра", callback_data: `task_tomorrow:${taskId}` },
+      { text: "🗑 Скасувати", callback_data: `task_cancel:${taskId}` },
+    ],
+  );
+  return { inline_keyboard: rows };
 }
 
 export { escapeTelegramHtml };
