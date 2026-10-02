@@ -81,10 +81,10 @@ export function priorityIcon(priority: string) {
   return "🟡";
 }
 
-export function taskActionKeyboard(taskId: number, performanceAlertId?: number | null): TasksBotReplyMarkup {
+export function taskActionKeyboard(taskId: number, performanceAlertId?: number | null, workState: "new" | "in_progress" = "new"): TasksBotReplyMarkup {
   const rows: TasksBotInlineButton[][] = [];
-  if (performanceAlertId) {
-    rows.push([{ text: "👀 Взяти в роботу", callback_data: `task_start:${taskId}` }]);
+  if (workState === "new") {
+    rows.push([{ text: "👀 Взято у роботу", callback_data: `task_start:${taskId}` }]);
   }
   rows.push(
     [
@@ -100,3 +100,19 @@ export function taskActionKeyboard(taskId: number, performanceAlertId?: number |
 }
 
 export { escapeTelegramHtml };
+
+
+export function taskFollowupKeyboard(taskId: number, performanceAlertId?: number | null): TasksBotReplyMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: "✅ Виконано", callback_data: `task_done:${taskId}` },
+        { text: "🔄 Ще в роботі", callback_data: `task_working:${taskId}` },
+      ],
+      [
+        { text: "⏰ +1 год", callback_data: `task_snooze:${taskId}:60` },
+        { text: "📅 На завтра", callback_data: `task_tomorrow:${taskId}` },
+      ],
+    ],
+  };
+}
