@@ -1,11 +1,11 @@
 import {
   clearTaskBotSession,
   createPersonalTask,
-  findTaskBotUserByUsername,
   getPersonalTask,
   getTaskBotSession,
   getTaskBotUser,
   listPersonalTasks,
+  listTaskBotUsers,
   localDateKey,
   localDateTimeToIso,
   parseCustomDeadline,
@@ -146,8 +146,8 @@ function datePartsForOffset(days: number, timezone = "Europe/Kyiv") {
 
 function sourceLabel(task: PersonalTask) {
   if (task.source_type === "performance") return "⚡ Performance OS";
-  if (task.source_type === "manager") return `👔 Керівник${task.assigned_by_label ? ` · ${escapeTelegramHtml(task.assigned_by_label)}` : ""}`;
-  if (task.source_type === "team") return `🤝 Команда${task.assigned_by_label ? ` · ${escapeTelegramHtml(task.assigned_by_label)}` : ""}`;
+  if (task.source_type === "manager") return `👔 Від керівника${task.assigned_by_label ? ` · ${escapeTelegramHtml(task.assigned_by_label)}` : ""}`;
+  if (task.source_type === "team") return `📌 Від ${task.assigned_by_label ? escapeTelegramHtml(task.assigned_by_label) : "команди"}`;
   return "👤 Особиста";
 }
 
@@ -158,7 +158,7 @@ function taskCard(task: PersonalTask, timezone = "Europe/Kyiv") {
   return `${priorityIcon(task.priority)} <b>${escapeTelegramHtml(task.title)}</b>${project}\n${sourceLabel(task)}${perf}\n⏰ ${escapeTelegramHtml(taskDueLabel(task.due_at, timezone))}${note}\nTask #${task.id}`;
 }
 
-async function showTaskList(chatId: number, userId: number, mode: "active" | "today" | "overdue" | "completed" | "manager" | "team") {
+async function showTaskList(chatId: number, userId: number, mode: "active" | "today" | "overdue" | "completed" | "assigned") {
   const user = await getTaskBotUser(userId);
   const timezone = user?.timezone || "Europe/Kyiv";
   const status = mode === "completed" ? "completed" : "active";
@@ -168,8 +168,7 @@ async function showTaskList(chatId: number, userId: number, mode: "active" | "to
 
   const filtered = tasks.filter((task) => {
     if (mode === "active" || mode === "completed") return true;
-    if (mode === "manager") return task.source_type === "manager";
-    if (mode === "team") return task.source_type === "team";
+    if (mode === "assigned") return task.source_type === "manager" || task.source_type === "team";
     if (!task.due_at) return false;
     const due = new Date(task.due_at);
     if (mode === "overdue") return due.getTime() < now;
@@ -180,8 +179,7 @@ async function showTaskList(chatId: number, userId: number, mode: "active" | "to
     mode === "active" ? "📋 <b>Активні задачі</b>" :
     mode === "today" ? "🔥 <b>На сьогодні</b>" :
     mode === "overdue" ? "⏰ <b>Прострочені</b>" :
-    mode === "manager" ? "👔 <b>Задачі від керівника</b>" :
-    mode === "team" ? "🤝 <b>Задачі від команди</b>" :
+    mode === "assigned" ? "📥 <b>Призначені мені</b>" :
     "✅ <b>Виконані</b>";
 
   if (!filtered.length) {
@@ -230,11 +228,28 @@ async function startCreateFlow(chatId: number, userId: number) {
 }
 
 async function startAssignFlow(chatId: number, userId: number) {
-  await setTaskBotSession(userId, "await_assignee", { assignmentMode: "other" });
+  const users = (await listTaskBotUsers()).filter((user) => user.telegram_user_id !== userId);
+  if (!users.length) {
+    await sendTasksBotMessage({
+      chatId,
+      text: "Поки немає інших користувачів PTS Tasks. Співробітник має хоча б раз відкрити бота і натиснути /start.",
+      replyMarkup: tasksBotMainKeyboard,
+    });
+    return;
+  }
+
+  await setTaskBotSession(userId, "await_assignee_pick", { assignmentMode: "other" });
+
+  const rows = users.map((user) => {
+    const name = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+    const tag = user.username ? `@${user.username}` : name || `ID ${user.telegram_user_id}`;
+    return [{ text: `👤 ${tag}`, callback_data: `assign_user:${user.telegram_user_id}` }];
+  });
+
   await sendTasksBotMessage({
     chatId,
-    text: "👥 <b>Поставити задачу спеціалісту</b>\n\nВведи Telegram username співробітника, наприклад <code>@zaharkrym</code>.\n\nСпівробітник має хоча б раз натиснути /start у PTS Tasks.",
-    replyMarkup: cancelKeyboard(),
+    text: "👥 <b>Кому поставити задачу?</b>\n\nОбери спеціаліста зі списку користувачів, які вже користуються PTS Tasks.",
+    replyMarkup: { inline_keyboard: rows },
   });
 }
 
@@ -294,27 +309,6 @@ async function handleCreateSession(chatId: number, userId: number, text: string)
   }
 
   const payload = { ...(session.payload || {}) };
-
-  if (session.state === "await_assignee") {
-    const assignee = await findTaskBotUserByUsername(text);
-    if (!assignee) {
-      await sendTasksBotMessage({ chatId, text: "Не знайшов цього користувача в PTS Tasks. Нехай він спочатку відкриє бота і натисне /start, після цього введи його @username ще раз." });
-      return true;
-    }
-    if (assignee.telegram_user_id === userId) {
-      await sendTasksBotMessage({ chatId, text: "Це ти сам 🙂 Для власної задачі використай «➕ Додати задачу»." });
-      return true;
-    }
-    payload.ownerTelegramUserId = assignee.telegram_user_id;
-    payload.assigneeUsername = assignee.username;
-    await setTaskBotSession(userId, "await_title", payload);
-    await sendTasksBotMessage({
-      chatId,
-      text: `👤 Виконавець: <b>@${escapeTelegramHtml(assignee.username || String(assignee.telegram_user_id))}</b>\n\nТепер напиши, що потрібно зробити.`,
-      replyMarkup: cancelKeyboard(),
-    });
-    return true;
-  }
 
   if (session.state === "await_title") {
     if (text.length < 2) {
@@ -427,6 +421,30 @@ async function handleCallback(query: TelegramCallbackQuery) {
   const chatId = query.message?.chat.id;
   const userId = query.from.id;
   if (!chatId) return;
+
+  if (data.startsWith("assign_user:")) {
+    const assigneeId = Number(data.split(":")[1]);
+    const assignee = await getTaskBotUser(assigneeId);
+    if (!assignee || assignee.telegram_user_id === userId) {
+      await answerTasksBotCallback(query.id, "Користувача не знайдено");
+      return;
+    }
+    await setTaskBotSession(userId, "await_title", {
+      assignmentMode: "other",
+      ownerTelegramUserId: assignee.telegram_user_id,
+      assigneeUsername: assignee.username,
+    });
+    const tag = assignee.username
+      ? `@${escapeTelegramHtml(assignee.username)}`
+      : escapeTelegramHtml([assignee.first_name, assignee.last_name].filter(Boolean).join(" ") || String(assignee.telegram_user_id));
+    await answerTasksBotCallback(query.id, "Спеціаліста обрано");
+    await sendTasksBotMessage({
+      chatId,
+      text: `👤 Виконавець: <b>${tag}</b>\n\nТепер напиши, що потрібно зробити.`,
+      replyMarkup: cancelKeyboard(),
+    });
+    return;
+  }
 
   if (data.startsWith("settings:")) {
     const user = await getTaskBotUser(userId);
@@ -617,12 +635,8 @@ export async function handleTasksBotUpdate(update: TasksBotUpdate) {
     await showTaskList(chatId, userId, "today");
     return;
   }
-  if (text === "👔 Від керівника") {
-    await showTaskList(chatId, userId, "manager");
-    return;
-  }
-  if (text === "🤝 Від команди") {
-    await showTaskList(chatId, userId, "team");
+  if (text === "📥 Призначені мені") {
+    await showTaskList(chatId, userId, "assigned");
     return;
   }
   if (text === "⏰ Прострочені") {
