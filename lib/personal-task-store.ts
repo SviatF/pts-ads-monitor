@@ -12,6 +12,7 @@ export type TaskBotUser = {
   evening_digest_enabled: boolean;
   last_morning_digest_date: string | null;
   last_evening_digest_date: string | null;
+  role: "member" | "manager";
   created_at: string;
   updated_at: string;
 };
@@ -27,6 +28,9 @@ export type PersonalTask = {
   status: "active" | "completed" | "cancelled";
   due_at: string | null;
   recurrence_rule: string | null;
+  source_type: "self" | "performance" | "manager" | "team";
+  performance_alert_id: number | null;
+  assigned_by_label: string | null;
   reminded_2h_at: string | null;
   reminded_due_at: string | null;
   reminded_overdue_at: string | null;
@@ -99,6 +103,13 @@ export async function getTaskBotUser(telegramUserId: number) {
   return rows[0] || null;
 }
 
+export async function findTaskBotUserByUsername(username: string) {
+  const clean = username.trim().replace(/^@/, "").toLowerCase();
+  if (!clean) return null;
+  const rows = await request<TaskBotUser[]>(`task_bot_users?select=*&username=ilike.${encodeURIComponent(clean)}&limit=1`);
+  return rows[0] || null;
+}
+
 export async function updateTaskBotUser(telegramUserId: number, patch: Partial<TaskBotUser>) {
   const rows = await request<TaskBotUser[]>(`task_bot_users?telegram_user_id=eq.${telegramUserId}`, {
     method: "PATCH",
@@ -138,6 +149,9 @@ export async function createPersonalTask(input: {
   notes?: string | null;
   priority?: "high" | "normal" | "low";
   dueAt?: string | null;
+  sourceType?: "self" | "performance" | "manager" | "team";
+  performanceAlertId?: number | null;
+  assignedByLabel?: string | null;
 }) {
   const rows = await request<PersonalTask[]>("personal_tasks", {
     method: "POST",
@@ -150,8 +164,16 @@ export async function createPersonalTask(input: {
       priority: input.priority || "normal",
       status: "active",
       due_at: input.dueAt || null,
+      source_type: input.sourceType || "self",
+      performance_alert_id: input.performanceAlertId || null,
+      assigned_by_label: input.assignedByLabel || null,
     }),
   });
+  return rows[0] || null;
+}
+
+export async function getPersonalTaskByPerformanceAlertId(alertId: number) {
+  const rows = await request<PersonalTask[]>(`personal_tasks?select=*&performance_alert_id=eq.${alertId}&limit=1`);
   return rows[0] || null;
 }
 
