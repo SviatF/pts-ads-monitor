@@ -17,6 +17,8 @@ import {
   sendTasksBotMessage,
   taskActionKeyboard,
 } from "@/lib/tasks-bot-telegram";
+import { listPerformanceMonitoringConfigs } from "@/lib/performance-config-store";
+import { syncOpenPerformanceTasksForUser } from "@/lib/performance-personal-task-sync";
 
 function taskLine(task: PersonalTask, timezone: string) {
   const project = task.project_name ? ` · ${escapeTelegramHtml(task.project_name)}` : "";
@@ -55,7 +57,7 @@ async function sendTaskReminder(task: PersonalTask, kind: "2h" | "due" | "overdu
       `${priorityIcon(task.priority)} <b>${escapeTelegramHtml(task.title)}</b>` +
       `${task.project_name ? `\n📁 ${escapeTelegramHtml(task.project_name)}` : ""}` +
       `\n⏰ ${escapeTelegramHtml(taskDueLabel(task.due_at, user.timezone))}\n\n${detail}`,
-    replyMarkup: taskActionKeyboard(task.id),
+    replyMarkup: taskActionKeyboard(task.id, task.performance_alert_id),
   });
 
   const nowIso = new Date().toISOString();
@@ -109,8 +111,24 @@ async function sendEveningDigest(user: TaskBotUser, now: Date) {
 
 export async function runTasksBotReminders() {
   const now = new Date();
-  const users = await listTaskBotUsers();
+  const [users, performanceConfigs] = await Promise.all([
+    listTaskBotUsers(),
+    listPerformanceMonitoringConfigs(),
+  ]);
   const userMap = new Map(users.map((user) => [user.telegram_user_id, user]));
+
+  // Keep personal inboxes in sync with all currently open actionable Performance OS alerts.
+  for (const user of users) {
+    try {
+      await syncOpenPerformanceTasksForUser({
+        telegramUserId: user.telegram_user_id,
+        username: user.username,
+        configs: performanceConfigs,
+      });
+    } catch (error) {
+      console.warn("Could not sync performance tasks for user", user.telegram_user_id, error);
+    }
+  }
   let reminders = 0;
   let digests = 0;
   const errors: string[] = [];
