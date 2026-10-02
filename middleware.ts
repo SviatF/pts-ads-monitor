@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 function isPublicApi(pathname: string) {
   if (pathname === "/api/telegram") return true;
   if (pathname === "/api/telegram/audit") return true;
+  if (pathname === "/api/tasks-bot") return true;
+  if (pathname === "/api/tasks-bot/reminders") return true;
   if (pathname.startsWith("/api/monitor")) return true;
   if (pathname.startsWith("/api/reporting/morning")) return true;
   if (pathname.startsWith("/api/reporting/lifecycle")) return true;
