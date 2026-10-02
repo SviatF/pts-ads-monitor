@@ -63,9 +63,8 @@ export const tasksBotMainKeyboard: TasksBotReplyMarkup = {
   keyboard: [
     [{ text: "➕ Додати задачу" }, { text: "👥 Поставити задачу" }],
     [{ text: "📋 Активні задачі" }, { text: "🔥 На сьогодні" }],
-    [{ text: "👔 Від керівника" }, { text: "🤝 Від команди" }],
-    [{ text: "⏰ Прострочені" }, { text: "✅ Виконані" }],
-    [{ text: "⚙️ Налаштування" }],
+    [{ text: "📥 Призначені мені" }, { text: "⏰ Прострочені" }],
+    [{ text: "✅ Виконані" }, { text: "⚙️ Налаштування" }],
   ],
   resize_keyboard: true,
 };
