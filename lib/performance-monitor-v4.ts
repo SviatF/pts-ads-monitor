@@ -5,6 +5,7 @@ import { getGoogleUserAccessToken } from "@/lib/google-oauth";
 import { dailyBlocksForDays } from "@/lib/report-template";
 import { dayIndexInPeriod, periodForDate, periodLength } from "@/lib/report-periods";
 import { performanceMention, sendPerformanceMessage } from "@/lib/performance-telegram";
+import { ensurePerformanceAlertPersonalTask } from "@/lib/performance-personal-task-sync";
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v26.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -207,8 +208,13 @@ async function sendActionable(config: EffectiveConfig, input: { key: string; typ
   }
   const saved = await saveSignal({ metaAccountId: config.meta_account_id, alertKey: input.key, alertType: input.type, severity: input.severity, title: input.title, details: input.details, notify: true });
   if (saved.blocked) return 0;
+  try {
+    await ensurePerformanceAlertPersonalTask(config, saved.alert);
+  } catch (error) {
+    console.warn("Could not sync performance alert to personal tasks", error);
+  }
   const tag = performanceMention(config.targetologist_telegram);
-  await sendPerformanceMessage(`${input.body}${tag ? `\nТаргетолог / Targetologist: ${tag}` : ""}\nAlert ID: <code>${saved.alert.id}</code>\nПідтвердити / ACK: <code>/perf_ack ${saved.alert.id}</code>`);
+  await sendPerformanceMessage(`${input.body}${tag ? `\nТаргетолог / Targetologist: ${tag}` : ""}\nAlert ID: <code>${saved.alert.id}</code>\nЗакриття: у персональному PTS Tasks боті.`);
   return 1;
 }
 async function digestSignal(config: EffectiveConfig, input: { key: string; type: string; title: string; details: Record<string, unknown> }) {
