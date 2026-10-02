@@ -55,7 +55,7 @@ export default async function Dashboard() {
 
         <nav className="sideNav">
           <Link href="/" className="sideNavItem active"><span>⌂</span>Overview</Link>
-          <Link href="/tasks" className="sideNavItem"><span>⚡</span>Performance OS</Link>
+          <Link href="/tasks" className="sideNavItem"><span>⚡</span>Performance OS</Link>\n          <Link href="/task-manager" className="sideNavItem"><span>✓</span>Task Manager</Link>
           <a href="#accounts" className="sideNavItem"><span>◉</span>Accounts</a>
           <a href="#reporting" className="sideNavItem"><span>▥</span>Reporting</a>
           <Link href="/diagnostics" className="sideNavItem"><span>⌁</span>Diagnostics</Link>
