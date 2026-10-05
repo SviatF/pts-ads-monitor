@@ -322,7 +322,7 @@ export async function runPerformanceMonitor() {
         }
       }
 
-      const creativeWindow = { since: daysAgo(6), until: daysAgo(0) };
+      // Creative budget-drain analysis uses the last 3 completed days.\n      // We intentionally exclude today so a partial day cannot falsely make one creative look weak/strong.\n      const creativeWindow = { since: daysAgo(3), until: daysAgo(1) };
       const [adsRecent, adsBase, ads7d] = await Promise.all([
         metaGraphAll<Insight>(`${objectId}/insights`, { level: "ad", fields: "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,clicks,impressions,actions,frequency", time_range: JSON.stringify({ since: daysAgo(3), until: daysAgo(1) }), limit: "500" }),
         metaGraphAll<Insight>(`${objectId}/insights`, { level: "ad", fields: "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,clicks,impressions,actions,frequency", time_range: JSON.stringify({ since: daysAgo(10), until: daysAgo(4) }), limit: "500" }),
