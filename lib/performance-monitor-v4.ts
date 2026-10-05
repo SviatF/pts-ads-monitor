@@ -98,6 +98,19 @@ function periodLabel(since: string, until: string) {
   return `${fmt(since)}–${fmt(until)}`;
 }
 function pctDelta(value: number) { return `${value >= 0 ? "+" : ""}${Math.round(value * 100)}%`; }
+function performancePushWindowOpen(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Kyiv",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const hour = Number(values.hour || 0);
+  // Quiet hours: 21:00–08:59 Kyiv. Performance analysis still runs,
+  // alerts/tasks are still persisted, but the group is not disturbed at night.
+  return hour >= 9 && hour < 21;
+}
 function quoteSheet(title: string) { return `'${title.replace(/'/g, "''")}'`; }
 function actionMap(actions?: MetaAction[]) { return new Map((actions || []).map((item) => [item.action_type || "", Number(item.value || 0)])); }
 function resultFor(actions: MetaAction[] | undefined, actionType: string | null) { return actionType ? Number(actionMap(actions).get(actionType) || 0) : 0; }
@@ -219,13 +232,24 @@ async function sendActionable(config: EffectiveConfig, input: { key: string; typ
     }
     return 0;
   }
-  const saved = await saveSignal({ metaAccountId: config.meta_account_id, alertKey: input.key, alertType: input.type, severity: input.severity, title: input.title, details: input.details, notify: true });
+  const canPushNow = performancePushWindowOpen();
+  const saved = await saveSignal({
+    metaAccountId: config.meta_account_id,
+    alertKey: input.key,
+    alertType: input.type,
+    severity: input.severity,
+    title: input.title,
+    details: canPushNow ? input.details : { ...input.details, push_suppressed: "quiet_hours_kyiv" },
+    notify: canPushNow,
+  });
   if (saved.blocked) return 0;
   try {
     await ensurePerformanceAlertPersonalTask(config, saved.alert);
   } catch (error) {
     console.warn("Could not sync performance alert to personal tasks", error);
   }
+  if (!canPushNow) return 0;
+
   const tag = performanceMention(config.targetologist_telegram);
   await sendPerformanceMessage(`${input.body}${tag ? `\nТаргетолог / Targetologist: ${tag}` : ""}\nAlert ID: <code>${saved.alert.id}</code>\nЗакриття: у персональному PTS Tasks боті.`);
   return 1;
