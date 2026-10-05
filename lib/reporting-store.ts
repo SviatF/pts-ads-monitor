@@ -116,3 +116,18 @@ export async function upsertReportingConfig(row: ReportingConfigInput): Promise<
   }
   return saved;
 }
+
+
+export async function setReportingCurrency(metaAccountId: string, currency: string) {
+  const rows = await request<ReportingConfig[]>(
+    `reporting_configs?meta_account_id=eq.${encodeURIComponent(metaAccountId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        currency: String(currency || "").trim().toUpperCase(),
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  );
+  return rows[0] || null;
+}
