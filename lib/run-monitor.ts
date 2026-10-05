@@ -51,6 +51,10 @@ export async function runMonitor(): Promise<MonitorResult> {
   const accountAlerts: string[] = [];
 
   for (const account of accounts) {
+    // Ended projects stay visible in the dashboard, but monitoring is frozen:
+    // no status refresh, no alerts and no rejected-ad scan.
+    if (endedAccountIds.has(account.id)) continue;
+
     const previous = previousByAccount.get(account.id) || null;
     const status = classifyAccountStatus(account.account_status);
     const changed = !previous || previous.account_status !== account.account_status;
@@ -65,10 +69,6 @@ export async function runMonitor(): Promise<MonitorResult> {
       last_checked_at: startedAt,
       status_changed_at: statusChangedAt,
     });
-
-    if (endedAccountIds.has(account.id)) {
-      continue;
-    }
 
     if (!previous) {
       accountAlerts.push(newAccountAddedMessage(account.name, account.id));
