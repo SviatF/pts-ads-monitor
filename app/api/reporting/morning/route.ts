@@ -4,6 +4,7 @@ import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
 import { syncMetaReporting } from "@/lib/meta-reporting-sync";
 import { listReportingTelegramSubscriptionsForAccount } from "@/lib/reporting-telegram-store";
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+import { formatCurrencyAmount, normalizeReportingCurrency } from "@/lib/report-currency";
 
 export const dynamic = "force-dynamic";
 
@@ -110,6 +111,7 @@ export async function GET(request: Request) {
           spreadsheetId: config.report_file_id,
           since: date,
           until: date,
+          currency: config.currency || "USD",
         });
 
         return { lifecycle, sync };
@@ -122,7 +124,7 @@ export async function GET(request: Request) {
       const createdText = lifecycle.created.length
         ? `\nНові аркуші: <b>${escapeTelegramHtml(lifecycle.created.join(", "))}</b>`
         : "";
-      const message = `✅ <b>Звіт заповнено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nКабінет: <code>${escapeTelegramHtml(config.meta_account_id)}</code>\nРезультати: <b>${sync.mappedLeads}</b>\nSpend: <b>$${sync.mappedSpend.toFixed(2)}</b>${createdText}\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`;
+      const message = `✅ <b>Звіт заповнено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nКабінет: <code>${escapeTelegramHtml(config.meta_account_id)}</code>\nРезультати: <b>${sync.mappedLeads}</b>\nSpend: <b>${formatCurrencyAmount(sync.mappedSpend, config.currency || "USD")}</b>${createdText}\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`;
 
       for (const subscription of subscriptions) await notify(subscription.telegram_chat_id, message);
 
@@ -140,6 +142,7 @@ export async function GET(request: Request) {
         created: lifecycle.created,
         leads: sync.mappedLeads,
         spend: sync.mappedSpend,
+        currency: normalizeReportingCurrency(config.currency || "USD"),
         chatsNotified: subscriptions.length,
         quotaRetried: operation.retried,
       });
