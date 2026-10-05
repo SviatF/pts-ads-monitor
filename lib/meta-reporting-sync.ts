@@ -3,6 +3,7 @@ import { dailyBlocksForDays } from "@/lib/report-template";
 import { applyReportFormulas } from "@/lib/report-formulas";
 import { dayIndexInPeriod, parseIsoDate, periodForDate, periodLength } from "@/lib/report-periods";
 import { syncCampaignPerformanceSheets, type CampaignPerformanceRow } from "@/lib/campaign-report-sheet";
+import { applyReportCurrencyFormats, normalizeReportingCurrency } from "@/lib/report-currency";
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v26.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -112,8 +113,10 @@ function channelLabel(channel: Channel | null) {
   return "Unmapped";
 }
 
-export async function syncMetaReporting(input: { accountId: string; spreadsheetId: string; since: string; until: string }) {
+export async function syncMetaReporting(input: { accountId: string; spreadsheetId: string; since: string; until: string; currency?: string | null }) {
+  const currency = normalizeReportingCurrency(input.currency || "USD");
   await applyReportFormulas(input.spreadsheetId);
+  await applyReportCurrencyFormats(input.spreadsheetId, currency);
 
   const objectId = input.accountId.startsWith("act_") ? input.accountId : `act_${input.accountId}`;
   const insights = await metaGraphAll<MetaInsight>(`${objectId}/insights`, {
@@ -189,7 +192,8 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
 
   await googleValuesBatchUpdate(input.spreadsheetId, data);
   await applyReportFormulas(input.spreadsheetId);
-  const campaignDetail = await syncCampaignPerformanceSheets(input.spreadsheetId, campaignRows);
+  const campaignDetail = await syncCampaignPerformanceSheets(input.spreadsheetId, campaignRows, currency);
+  await applyReportCurrencyFormats(input.spreadsheetId, currency);
 
   return {
     insightRows: insights.length,
