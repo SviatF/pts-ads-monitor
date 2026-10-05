@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { listReportingConfigs } from "@/lib/reporting-store";
 import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
 import { applyReportFormulas } from "@/lib/report-formulas";
+import { applyReportCurrencyFormats } from "@/lib/report-currency";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,7 @@ export async function GET(request: Request) {
         reportingStartDate: config.report_start_date,
       });
       await applyReportFormulas(config.report_file_id);
+      await applyReportCurrencyFormats(config.report_file_id, config.currency || "USD");
       results.push({ accountId: config.meta_account_id, created: lifecycle.created });
     } catch (error) {
       results.push({ accountId: config.meta_account_id, error: error instanceof Error ? error.message : String(error) });
