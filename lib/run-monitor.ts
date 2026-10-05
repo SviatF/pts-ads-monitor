@@ -1,6 +1,7 @@
 import { classifyAccountStatus, getBusinessAccounts, getRejectedAds } from "@/lib/meta";
 import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
 import { listReportingConfigs } from "@/lib/reporting-store";
+import { listEndedProjects } from "@/lib/project-lifecycle";
 import {
   listSeenRejectedAdIds,
   listStoredAccounts,
@@ -30,7 +31,11 @@ export type MonitorResult = {
 
 export async function runMonitor(): Promise<MonitorResult> {
   const startedAt = new Date().toISOString();
-  const accounts = await getBusinessAccounts();
+  const [accounts, endedProjects] = await Promise.all([
+    getBusinessAccounts(),
+    listEndedProjects(),
+  ]);
+  const endedAccountIds = new Set(endedProjects.map((row) => row.meta_account_id));
   const result = {
     checkedAccounts: accounts.length,
     accountAlerts: 0,
@@ -60,6 +65,10 @@ export async function runMonitor(): Promise<MonitorResult> {
       last_checked_at: startedAt,
       status_changed_at: statusChangedAt,
     });
+
+    if (endedAccountIds.has(account.id)) {
+      continue;
+    }
 
     if (!previous) {
       accountAlerts.push(newAccountAddedMessage(account.name, account.id));
@@ -115,6 +124,7 @@ export async function runMonitor(): Promise<MonitorResult> {
   const rejectAlerts: Array<{ accountName: string; accountId: string; names: string[] }> = [];
 
   for (const account of accounts) {
+    if (endedAccountIds.has(account.id)) continue;
     try {
       const previous = previousByAccount.get(account.id) || null;
       const rejectedAds = await getRejectedAds(account.id);
