@@ -4,6 +4,7 @@ import { countRejectedAds, listStoredAccounts } from "@/lib/store";
 import { listReportingConfigs } from "@/lib/reporting-store";
 import { listPerformanceMonitoringConfigs } from "@/lib/performance-config-store";
 import { runMonitor } from "@/lib/run-monitor";
+import { endProjectCooperation, listEndedProjects } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -19,30 +20,43 @@ async function runMonitorNow() {
   revalidatePath("/");
 }
 
+async function endCooperationAction(formData: FormData) {
+  "use server";
+  const accountId = String(formData.get("meta_account_id") || "").trim();
+  if (!accountId) return;
+  await endProjectCooperation(accountId, "dashboard");
+  revalidatePath("/");
+  revalidatePath("/tasks");
+  revalidatePath("/task-manager");
+}
+
 export default async function Dashboard() {
   let accounts = [] as Awaited<ReturnType<typeof listStoredAccounts>>;
   let reportingConfigs = [] as Awaited<ReturnType<typeof listReportingConfigs>>;
   let monitoringConfigs = [] as Awaited<ReturnType<typeof listPerformanceMonitoringConfigs>>;
+  let endedProjects = [] as Awaited<ReturnType<typeof listEndedProjects>>;
   let rejectedCount = 0;
   let error = "";
 
   try {
-    [accounts, rejectedCount, reportingConfigs, monitoringConfigs] = await Promise.all([
+    [accounts, rejectedCount, reportingConfigs, monitoringConfigs, endedProjects] = await Promise.all([
       listStoredAccounts(),
       countRejectedAds(),
       listReportingConfigs(),
       listPerformanceMonitoringConfigs(),
+      listEndedProjects(),
     ]);
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }
 
+  const endedByAccount = new Map(endedProjects.map((item) => [item.meta_account_id, item]));
   const configuredReporting = reportingConfigs.filter((item) => item.status === "configured");
-  const active = accounts.filter((a) => a.status_kind === "active").length;
-  const problems = accounts.filter((a) => a.status_kind !== "active").length;
+  const active = accounts.filter((a) => a.status_kind === "active" && !endedByAccount.has(a.meta_account_id)).length;
+  const problems = accounts.filter((a) => a.status_kind !== "active" && !endedByAccount.has(a.meta_account_id)).length;
   const reportingByAccount = new Map(configuredReporting.map((config) => [config.meta_account_id, config]));
   const monitoringByAccount = new Map(monitoringConfigs.map((config) => [config.meta_account_id, config]));
-  const needsSetup = accounts.filter((account) => !reportingByAccount.has(account.meta_account_id) && !monitoringByAccount.has(account.meta_account_id));
+  const needsSetup = accounts.filter((account) => !endedByAccount.has(account.meta_account_id) && !reportingByAccount.has(account.meta_account_id) && !monitoringByAccount.has(account.meta_account_id));
   const monitoringEnabled = monitoringConfigs.filter((item) => item.enabled).length;
 
   return (
@@ -137,7 +151,7 @@ export default async function Dashboard() {
             ) : (
               <div className="tableWrap">
                 <table>
-                  <thead><tr><th>Account</th><th>ID</th><th>Status</th><th>Performance Control</th><th>Reporting</th><th>Last check</th></tr></thead>
+                  <thead><tr><th>Account</th><th>ID</th><th>Status</th><th>Performance Control</th><th>Reporting</th><th>Last check</th><th>Cooperation</th></tr></thead>
                   <tbody>
                     {accounts.map((account) => {
                       const cls = statusClass(account.status_kind);
@@ -145,17 +159,26 @@ export default async function Dashboard() {
                       const monitoring = monitoringByAccount.get(account.meta_account_id);
                       const reportingHref = `/reporting/${encodeURIComponent(account.meta_account_id)}`;
                       const monitoringHref = `/monitoring/${encodeURIComponent(account.meta_account_id)}`;
+                      const ended = endedByAccount.get(account.meta_account_id);
                       return <tr key={account.meta_account_id}>
                         <td><strong>{account.name}</strong></td>
                         <td><code>{account.meta_account_id}</code></td>
-                        <td className={cls}><span className={`dot ${cls}`} />{account.status_label}</td>
+                        <td className={ended ? "bad" : cls}>
+                          <span className={`dot ${ended ? "bad" : cls}`} />
+                          {ended ? "Співпрацю завершено" : account.status_label}
+                        </td>
                         <td>
-                          {monitoring?.enabled ? (
+                          {ended ? <span className="bad">STOPPED</span> : monitoring?.enabled ? (
                             <div className="reportingCell"><span className="ok">ON · {monitoring.source === "reporting" ? "via Reporting" : "Monitor only"}</span><div className="reportingActions"><Link className="inlineSetup" href={monitoringHref}>Керувати</Link></div></div>
                           ) : <Link className="inlineSetup" href={monitoringHref}>Підключити</Link>}
                         </td>
                         <td>
-                          {reporting ? (
+                          {ended ? (
+                            <div className="reportingCell">
+                              <span className="bad">STOPPED</span>
+                              {reporting?.report_url ? <div className="reportingActions"><a href={reporting.report_url} target="_blank" rel="noreferrer">Open Sheet ↗</a></div> : null}
+                            </div>
+                          ) : reporting ? (
                             <div className="reportingCell">
                               <span className="ok">Configured · {reporting.goal_label}</span>
                               <div className="reportingActions">
@@ -166,6 +189,19 @@ export default async function Dashboard() {
                           ) : <Link className="inlineSetup" href={reportingHref}>Налаштувати звітність</Link>}
                         </td>
                         <td>{new Date(account.last_checked_at).toLocaleString("uk-UA")}</td>
+                        <td>
+                          {ended ? (
+                            <div className="reportingCell">
+                              <span className="bad">ENDED</span>
+                              <small>{ended.ended_at ? new Date(ended.ended_at).toLocaleString("uk-UA") : ""}</small>
+                            </div>
+                          ) : (
+                            <form action={endCooperationAction}>
+                              <input type="hidden" name="meta_account_id" value={account.meta_account_id} />
+                              <button className="endCooperationButton" type="submit">ЗАКІНЧИЛИ СПІВПРАЦЮ</button>
+                            </form>
+                          )}
+                        </td>
                       </tr>;
                     })}
                   </tbody>
