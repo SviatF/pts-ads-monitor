@@ -66,8 +66,10 @@ export default {
       tasks.push(callInternal("/api/performance/management?kind=escalations", env, ctx));
     }
 
-    // At 07:00 Europe/Kyiv run lifecycle -> previous-day Meta sync -> Telegram status.
-    if (hour === 7 && minute < 10) {
+    // At 09:00 Europe/Kyiv run lifecycle -> previous-day Meta sync -> Telegram status.
+    // Reporting is intentionally delayed from early morning so the team receives
+    // completed sheets and the status message during normal working hours.
+    if (hour === 9 && minute < 10) {
       tasks.push(callInternal("/api/reporting/morning", env, ctx));
     }
 
