@@ -9,6 +9,7 @@ import {
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
 import { acknowledgePerformanceAlert, resolvePerformanceAlert, addPerformanceAlertNote } from "@/lib/performance-alert-store";
 import { runPerformanceMonitor } from "@/lib/performance-monitor-v4";
+import { formatCurrencyAmount } from "@/lib/report-currency";
 import { sendPerformanceBrief } from "@/lib/performance-brief";
 import { sendDailyPerformanceTasks } from "@/lib/performance-tasks-v2";
 import { sendManagementEscalations, sendRecurringProblemReport, sendWeeklyTeamScorecard } from "@/lib/performance-operations";
@@ -228,10 +229,10 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
       const config = await getReportingConfig(target.meta_account_id);
       if (!config) continue;
       await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: config.report_start_date });
-      const result = await syncMetaReporting({ accountId: config.meta_account_id, spreadsheetId: config.report_file_id, since: date, until: date });
+      const result = await syncMetaReporting({ accountId: config.meta_account_id, spreadsheetId: config.report_file_id, since: date, until: date, currency: config.currency || "USD" });
       await sendTelegramToChat(
         chatId,
-        `✅ <b>Звіт оновлено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nРезультати: <b>${result.mappedLeads}</b>\nВитрати: <b>$${result.mappedSpend.toFixed(2)}</b>\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
+        `✅ <b>Звіт оновлено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nРезультати: <b>${result.mappedLeads}</b>\nВитрати: <b>${formatCurrencyAmount(result.mappedSpend, config.currency || "USD")}</b>\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
       );
     }
     return true;
