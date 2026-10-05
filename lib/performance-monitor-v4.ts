@@ -89,7 +89,14 @@ async function optionalMetaGraphAll<T>(path: string, params: Record<string, stri
 
 function dateIso(date: Date) { return date.toISOString().slice(0, 10); }
 function daysAgo(days: number) { const d = new Date(); d.setUTCDate(d.getUTCDate() - days); return dateIso(d); }
-function money(value: number) { return `$${value.toFixed(2)}`; }
+function money(value: number) { return `${value.toFixed(2)}`; }
+function periodLabel(since: string, until: string) {
+  const fmt = (iso: string) => {
+    const [, month, day] = iso.split("-");
+    return `${day}.${month}`;
+  };
+  return `${fmt(since)}–${fmt(until)}`;
+}
 function pctDelta(value: number) { return `${value >= 0 ? "+" : ""}${Math.round(value * 100)}%`; }
 function quoteSheet(title: string) { return `'${title.replace(/'/g, "''")}'`; }
 function actionMap(actions?: MetaAction[]) { return new Map((actions || []).map((item) => [item.action_type || "", Number(item.value || 0)])); }
@@ -228,7 +235,7 @@ async function digestSignal(config: EffectiveConfig, input: { key: string; type:
 }
 
 async function resolveOldLogic(config: EffectiveConfig) {
-  const rows = await supabaseRequest<AlertRecord[]>(`performance_alerts?select=*&meta_account_id=eq.${encodeURIComponent(config.meta_account_id)}&resolved_at=is.null&alert_type=in.(NO_OPTIMIZATION,CAMPAIGN_CPL_SPIKE,CAMPAIGN_VOLUME_DROP,CREATIVE_WASTE,ADSET_WASTE,CREATIVE_FATIGUE,CREATIVE_WINNER,CREATIVE_PIPELINE_EMPTY)&limit=200`);
+  const rows = await supabaseRequest<AlertRecord[]>(`performance_alerts?select=*&meta_account_id=eq.${encodeURIComponent(config.meta_account_id)}&resolved_at=is.null&alert_type=in.(NO_OPTIMIZATION,CAMPAIGN_CPL_SPIKE,CAMPAIGN_VOLUME_DROP,CREATIVE_WASTE,ADSET_WASTE,CREATIVE_FATIGUE,CREATIVE_PIPELINE_EMPTY,CREATIVE_WASTE_V4,CREATIVE_FATIGUE_V4,ADSET_ISSUE_V4,CREATIVE_PIPELINE_V4)&limit=200`);
   for (const row of rows) await patchAlert(row.id, { resolved_at: new Date().toISOString(), details: { ...(row.details || {}), resolved_reason: "replaced_by_performance_v4" } });
 }
 
@@ -315,57 +322,147 @@ export async function runPerformanceMonitor() {
         }
       }
 
-      const [adsRecent, adsBase, adsetsRecent] = await Promise.all([
+      const creativeWindow = { since: daysAgo(6), until: daysAgo(0) };
+      const [adsRecent, adsBase, ads7d] = await Promise.all([
         metaGraphAll<Insight>(`${objectId}/insights`, { level: "ad", fields: "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,clicks,impressions,actions,frequency", time_range: JSON.stringify({ since: daysAgo(3), until: daysAgo(1) }), limit: "500" }),
         metaGraphAll<Insight>(`${objectId}/insights`, { level: "ad", fields: "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,clicks,impressions,actions,frequency", time_range: JSON.stringify({ since: daysAgo(10), until: daysAgo(4) }), limit: "500" }),
-        metaGraphAll<Insight>(`${objectId}/insights`, { level: "adset", fields: "campaign_id,campaign_name,adset_id,adset_name,spend,clicks,impressions,actions", time_range: JSON.stringify({ since: daysAgo(3), until: daysAgo(1) }), limit: "500" }),
+        metaGraphAll<Insight>(`${objectId}/insights`, { level: "ad", fields: "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,clicks,impressions,actions", time_range: JSON.stringify(creativeWindow), limit: "500" }),
       ]);
       const campaignMap = new Map(active.map((c) => [c.id, c]));
       const baseAds = new Map(adsBase.map((r) => [String(r.ad_id), r]));
 
+      // Positive winner signal stays informational: confirmed on 3 completed days.
       for (const row of adsRecent) {
-        const campaignId = String(row.campaign_id || ""); const campaign = campaignMap.get(campaignId); const actionType = actionByCampaign.get(campaignId) || null;
+        const campaignId = String(row.campaign_id || "");
+        const campaign = campaignMap.get(campaignId);
+        const actionType = actionByCampaign.get(campaignId) || null;
         if (!campaign || !actionType) continue;
-        const targetCpl = cpl(campaign.baseline7); if (targetCpl <= 0) continue;
-        const spend = Number(row.spend || 0), results = resultFor(row.actions, actionType);
-        if (results === 0 && spend >= targetCpl * 3) {
-          summary.notifications += await sendActionable(config, { key: `creative_waste_v4:${row.ad_id || row.ad_name}`, type: "CREATIVE_WASTE_V4", severity: spend >= targetCpl * 5 ? "critical" : "action_required", title: `Creative waste — ${row.ad_name || "Без назви"}`, body: `⚡ <b>CREATIVE WASTE / КРЕАТИВ БЕЗ РЕЗУЛЬТАТУ</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nCampaign: <b>${escapeTelegramHtml(row.campaign_name || "—")}</b>\nCreative: <b>${escapeTelegramHtml(row.ad_name || "Без назви")}</b>\nSpend: <b>${money(spend)}</b> · Results: <b>0</b>\nОрієнтир CPL / target proxy: <b>${money(targetCpl)}</b>`, details: { campaignId, adId: row.ad_id, spend, results, targetCpl, actionType } });
-          summary.alerts++;
-        }
+        const targetCpl = cpl(campaign.baseline7);
+        if (targetCpl <= 0) continue;
+
+        const spend = Number(row.spend || 0);
+        const results = resultFor(row.actions, actionType);
         const base = baseAds.get(String(row.ad_id));
-        if (base && results >= 3) {
-          const recentMetric: WindowMetric = { spend, results, clicks: Number(row.clicks || 0), impressions: Number(row.impressions || 0) };
-          const baseMetric: WindowMetric = { spend: Number(base.spend || 0), results: resultFor(base.actions, actionType), clicks: Number(base.clicks || 0), impressions: Number(base.impressions || 0) };
-          const freqRecent = Number(row.frequency || 0), freqBase = Number(base.frequency || 0);
-          const ctrDrop = ratioChange(ctr(recentMetric), ctr(baseMetric)); const cplGrow = ratioChange(cpl(recentMetric), cpl(baseMetric)); const cpmGrow = ratioChange(cpm(recentMetric), cpm(baseMetric));
-          const frequencyGrow = freqBase > 0 ? freqRecent / freqBase - 1 : 0;
-          if (freqRecent >= 3 && frequencyGrow >= 0.15 && ctrDrop <= -0.2 && cplGrow >= 0.3 && cpmGrow >= -0.05) {
-            summary.notifications += await sendActionable(config, { key: `creative_fatigue_v4:${row.ad_id || row.ad_name}`, type: "CREATIVE_FATIGUE_V4", severity: cplGrow >= 0.6 ? "critical" : "action_required", title: `Creative fatigue — ${row.ad_name || "Без назви"}`, body: `🎨 <b>CREATIVE FATIGUE / КРЕАТИВ ВИГОРАЄ</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nCreative: <b>${escapeTelegramHtml(row.ad_name || "Без назви")}</b>\nFrequency: <b>${freqBase.toFixed(1)} → ${freqRecent.toFixed(1)}</b>\nCTR: <b>${pctDelta(ctrDrop)}</b> · CPM: <b>${pctDelta(cpmGrow)}</b> · CPL: <b>${pctDelta(cplGrow)}</b>\n\nКомбінація сигналів підтверджує fatigue.`, details: { campaignId, adId: row.ad_id, frequencyGrow, ctrDrop, cpmGrow, cplGrow } });
-            summary.alerts++;
-          }
-          if (results >= 5 && cpl(recentMetric) <= targetCpl * 0.65) await digestSignal(config, { key: `creative_winner_v4:${row.ad_id || row.ad_name}`, type: "CREATIVE_WINNER_V4", title: `Winner — ${row.ad_name || "Без назви"}`, details: { campaignId, adId: row.ad_id, results, cpl: cpl(recentMetric), targetCpl } });
+        if (!base || results < 5) continue;
+
+        const recentMetric: WindowMetric = {
+          spend,
+          results,
+          clicks: Number(row.clicks || 0),
+          impressions: Number(row.impressions || 0),
+        };
+        if (cpl(recentMetric) <= targetCpl * 0.65) {
+          await digestSignal(config, {
+            key: `creative_winner_v4:${row.ad_id || row.ad_name}`,
+            type: "CREATIVE_WINNER_V4",
+            title: `Winner — ${row.ad_name || "Без назви"}`,
+            details: { campaignId, adId: row.ad_id, results, cpl: cpl(recentMetric), targetCpl },
+          });
         }
       }
 
-      for (const row of adsetsRecent) {
-        const campaignId = String(row.campaign_id || ""); const campaign = campaignMap.get(campaignId); const actionType = actionByCampaign.get(campaignId) || null;
-        if (!campaign || !actionType) continue;
-        const targetCpl = cpl(campaign.baseline7); if (targetCpl <= 0) continue;
-        const spend = Number(row.spend || 0), results = resultFor(row.actions, actionType), rowCpl = results > 0 ? spend / results : 0;
-        const zeroWaste = results === 0 && spend >= targetCpl * 2.5;
-        const expensive = results >= 3 && rowCpl >= targetCpl * 2 && spend >= targetCpl * 3;
-        if (zeroWaste || expensive) {
-          summary.notifications += await sendActionable(config, { key: `adset_issue_v4:${row.adset_id || row.adset_name}`, type: "ADSET_ISSUE_V4", severity: zeroWaste && spend >= targetCpl * 4 ? "critical" : "action_required", title: `Ad set issue — ${row.adset_name || "Без назви"}`, body: `⚡ <b>AD SET ISSUE / ПОТРЕБУЄ ПЕРЕВІРКИ</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nCampaign: <b>${escapeTelegramHtml(row.campaign_name || "—")}</b>\nAd set: <b>${escapeTelegramHtml(row.adset_name || "—")}</b>\nSpend: <b>${money(spend)}</b> · Results: <b>${results}</b>${results > 0 ? ` · CPL: <b>${money(rowCpl)}</b>` : ""}\nTarget proxy / baseline CPL: <b>${money(targetCpl)}</b>`, details: { campaignId, adsetId: row.adset_id, spend, results, rowCpl, targetCpl } });
-          summary.alerts++;
-        }
+      // The only negative optimization alert at creative/ad-set level:
+      // a materially weaker creative is consuming a meaningful share of the SAME ad set's budget.
+      const adsByAdset = new Map<string, Insight[]>();
+      for (const row of ads7d) {
+        const campaignId = String(row.campaign_id || "");
+        const adsetId = String(row.adset_id || "");
+        const actionType = actionByCampaign.get(campaignId) || null;
+        if (!campaignMap.has(campaignId) || !actionType || !adsetId) continue;
+        const rows = adsByAdset.get(adsetId) || [];
+        rows.push(row);
+        adsByAdset.set(adsetId, rows);
       }
 
-      const total7dSpend = active.reduce((sum, c) => sum + c.baseline7.spend, 0);
-      if (total7dSpend >= 200) {
-        const metaAds = await optionalMetaGraphAll<MetaAd>(`${objectId}/ads`, { fields: "id,name,created_time,campaign_id", limit: "500" });
-        const newest = metaAds.map((ad) => ad.created_time ? new Date(ad.created_time).getTime() : 0).reduce((a, b) => Math.max(a, b), 0);
-        const ageDays = newest ? (Date.now() - newest) / 86400000 : 0;
-        if (newest && ageDays >= 10) await digestSignal(config, { key: "creative_pipeline_v4", type: "CREATIVE_PIPELINE_V4", title: "Потрібні нові креативи / Creative pipeline", details: { ageDays, total7dSpend } });
+      for (const [adsetId, rows] of adsByAdset) {
+        if (rows.length < 2) continue;
+        const campaignId = String(rows[0]?.campaign_id || "");
+        const actionType = actionByCampaign.get(campaignId) || null;
+        if (!actionType) continue;
+
+        const metrics = rows.map((row) => {
+          const spend = Number(row.spend || 0);
+          const results = resultFor(row.actions, actionType);
+          return {
+            row,
+            spend,
+            results,
+            cpl: results > 0 ? spend / results : Number.POSITIVE_INFINITY,
+          };
+        }).filter((item) => item.spend > 0);
+
+        const totalSpend = metrics.reduce((sum, item) => sum + item.spend, 0);
+        const totalResults = metrics.reduce((sum, item) => sum + item.results, 0);
+        if (totalSpend <= 0 || totalResults < 4) continue;
+
+        // Winner must have enough real conversions to be a useful comparator.
+        const winnerPool = metrics.filter((item) => item.results >= 3);
+        if (!winnerPool.length) continue;
+        winnerPool.sort((a, b) => a.cpl - b.cpl);
+        const winner = winnerPool[0];
+        if (!Number.isFinite(winner.cpl) || winner.cpl <= 0) continue;
+
+        const candidates = metrics.filter((item) => {
+          if (item.row.ad_id === winner.row.ad_id) return false;
+          const spendShare = item.spend / totalSpend;
+          const resultShare = totalResults > 0 ? item.results / totalResults : 0;
+          const cplRatio = item.results > 0 ? item.cpl / winner.cpl : Number.POSITIVE_INFINITY;
+          const enoughSpend = item.spend >= winner.cpl * 3;
+          const inefficient = item.results === 0 || cplRatio >= 2;
+          const budgetDrain = spendShare >= 0.30 && resultShare <= Math.max(0.5, spendShare - 0.15);
+          return enoughSpend && inefficient && budgetDrain;
+        });
+        if (!candidates.length) continue;
+
+        candidates.sort((a, b) => b.spend - a.spend);
+        const loser = candidates[0];
+        const spendShare = loser.spend / totalSpend;
+        const resultShare = totalResults > 0 ? loser.results / totalResults : 0;
+        const cplRatio = loser.results > 0 ? loser.cpl / winner.cpl : Number.POSITIVE_INFINITY;
+        const severity: "action_required" | "critical" =
+          (!Number.isFinite(cplRatio) || cplRatio >= 3) && spendShare >= 0.4 ? "critical" : "action_required";
+
+        const loserCplLabel = loser.results > 0 ? money(loser.cpl) : "0 results";
+        const ratioLabel = Number.isFinite(cplRatio) ? `${cplRatio.toFixed(1)}×` : "без результатів";
+        const adsetName = loser.row.adset_name || rows[0]?.adset_name || "Без назви";
+        const body =
+          `${severity === "critical" ? "🔴" : "🟠"} <b>КРЕАТИВ З ГІРШИМИ ПОКАЗНИКАМИ ЗАБИРАЄ БЮДЖЕТ</b>\n\n` +
+          `Проєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\n` +
+          `Ad Set: <b>${escapeTelegramHtml(adsetName)}</b>\n` +
+          `🔴 ${escapeTelegramHtml(loser.row.ad_name || "Без назви")}: <b>${loser.results} results · ${loserCplLabel}</b>\n` +
+          `🟢 ${escapeTelegramHtml(winner.row.ad_name || "Без назви")}: <b>${winner.results} results · ${money(winner.cpl)}</b>\n` +
+          `Період: <b>${periodLabel(creativeWindow.since, creativeWindow.until)}</b>\n\n` +
+          `Слабший creative забрав <b>${Math.round(spendShare * 100)}%</b> spend при CPL ${ratioLabel} гіршому за сильніший. Перевірити та обмежити/замінити.`;
+
+        summary.notifications += await sendActionable(config, {
+          key: `creative_budget_drain_v1:${adsetId}:${loser.row.ad_id || loser.row.ad_name}`,
+          type: "CREATIVE_BUDGET_DRAIN_V1",
+          severity,
+          title: `Слабкий креатив забирає бюджет — ${loser.row.ad_name || "Без назви"}`,
+          body,
+          details: {
+            campaignId,
+            campaignName: loser.row.campaign_name,
+            adsetId,
+            adsetName,
+            weakAdId: loser.row.ad_id,
+            weakAdName: loser.row.ad_name,
+            weakSpend: loser.spend,
+            weakResults: loser.results,
+            weakCpl: loser.results > 0 ? loser.cpl : null,
+            weakSpendShare: spendShare,
+            weakResultShare: resultShare,
+            winnerAdId: winner.row.ad_id,
+            winnerAdName: winner.row.ad_name,
+            winnerSpend: winner.spend,
+            winnerResults: winner.results,
+            winnerCpl: winner.cpl,
+            cplRatio: Number.isFinite(cplRatio) ? cplRatio : null,
+            actionType,
+            period: creativeWindow,
+          },
+        });
+        summary.alerts++;
       }
 
       if (config.reporting?.report_file_id && config.reporting.report_file_id !== "MONITOR_ONLY") {
