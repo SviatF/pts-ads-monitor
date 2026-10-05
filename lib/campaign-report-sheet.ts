@@ -1,5 +1,6 @@
 import { getGoogleUserAccessToken } from "@/lib/google-oauth";
 import { periodForDate } from "@/lib/report-periods";
+import { normalizeReportingCurrency } from "@/lib/report-currency";
 
 export type CampaignPerformanceRow = {
   date: string;
@@ -166,7 +167,18 @@ async function writeValues(spreadsheetId: string, title: string, values: Array<A
   if (!response.ok) throw new Error(`Google API failed (${response.status}): ${await response.text()}`);
 }
 
-async function formatSheet(spreadsheetId: string, sheetId: number, values: Array<Array<string | number>>) {
+function currencyPattern(currency: string) {
+  switch (normalizeReportingCurrency(currency)) {
+    case "USD": return "$#,##0.00";
+    case "EUR": return "€#,##0.00";
+    case "PLN": return '#,##0.00 "zł"';
+    case "UAH": return '#,##0.00 "₴"';
+    case "GBP": return "£#,##0.00";
+    default: return `#,##0.00 "${normalizeReportingCurrency(currency)}"`;
+  }
+}
+
+async function formatSheet(spreadsheetId: string, sheetId: number, values: Array<Array<string | number>>, currency: string) {
   const headerRows: number[] = [];
   const sectionRows: number[] = [];
   values.forEach((row, index) => {
@@ -183,8 +195,8 @@ async function formatSheet(spreadsheetId: string, sheetId: number, values: Array
     { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 3, endIndex: 6 }, properties: { pixelSize: 135 }, fields: "pixelSize" } },
     { repeatCell: { range: { sheetId, startRowIndex: 0, endRowIndex: values.length, startColumnIndex: 0, endColumnIndex: 6 }, cell: { userEnteredFormat: { textFormat: { fontFamily: "Arial", fontSize: 9 }, verticalAlignment: "MIDDLE" } }, fields: "userEnteredFormat(textFormat,verticalAlignment)" } },
     { repeatCell: { range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 6 }, cell: { userEnteredFormat: { backgroundColor: { red: 0.04, green: 0.18, blue: 0.22 }, textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 14 }, horizontalAlignment: "LEFT" } }, fields: "userEnteredFormat" } },
-    { repeatCell: { range: { sheetId, startColumnIndex: 3, endColumnIndex: 4 }, cell: { userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }, fields: "userEnteredFormat.numberFormat" } },
-    { repeatCell: { range: { sheetId, startColumnIndex: 5, endColumnIndex: 6 }, cell: { userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }, fields: "userEnteredFormat.numberFormat" } },
+    { repeatCell: { range: { sheetId, startColumnIndex: 3, endColumnIndex: 4 }, cell: { userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: currencyPattern(currency) } } }, fields: "userEnteredFormat.numberFormat" } },
+    { repeatCell: { range: { sheetId, startColumnIndex: 5, endColumnIndex: 6 }, cell: { userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: currencyPattern(currency) } } }, fields: "userEnteredFormat.numberFormat" } },
   ];
 
   for (const rowIndex of sectionRows) {
@@ -200,7 +212,7 @@ async function formatSheet(spreadsheetId: string, sheetId: number, values: Array
   });
 }
 
-export async function syncCampaignPerformanceSheets(spreadsheetId: string, rows: CampaignPerformanceRow[]) {
+export async function syncCampaignPerformanceSheets(spreadsheetId: string, rows: CampaignPerformanceRow[], currency = "USD") {
   const activeRows = rows.filter((row) => row.spend > 0 || row.results > 0);
   const byMonth = new Map<string, CampaignPerformanceRow[]>();
   for (const row of activeRows) {
@@ -217,7 +229,7 @@ export async function syncCampaignPerformanceSheets(spreadsheetId: string, rows:
     await clearSheet(spreadsheetId, title);
     const built = buildValues(month, monthRows);
     await writeValues(spreadsheetId, title, built.values);
-    await formatSheet(spreadsheetId, sheetId, built.values);
+    await formatSheet(spreadsheetId, sheetId, built.values, currency);
     sheets.push({ title, rows: monthRows.length });
   }
 
