@@ -6,6 +6,7 @@ import { dailyBlocksForDays } from "@/lib/report-template";
 import { dayIndexInPeriod, periodForDate, periodLength } from "@/lib/report-periods";
 import { performanceMention, sendPerformanceMessage } from "@/lib/performance-telegram";
 import { ensurePerformanceAlertPersonalTask } from "@/lib/performance-personal-task-sync";
+import { analyzeAdsetBudgetDrain } from "@/lib/adset-budget-drain";
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v26.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -483,6 +484,37 @@ export async function runPerformanceMonitor() {
             winnerCpl: winner.cpl,
             cplRatio: Number.isFinite(cplRatio) ? cplRatio : null,
             actionType,
+            period: creativeWindow,
+          },
+        });
+        summary.alerts++;
+      }
+
+      for (const signal of analyzeAdsetBudgetDrain(ads7d, actionByCampaign)) {
+        const severity: "action_required" | "critical" =
+          (signal.cplRatio === null || signal.cplRatio >= 3) && signal.weakSpendShare >= 0.4
+            ? "critical"
+            : "action_required";
+        const weakCpl = signal.weakCpl === null ? "0 results" : money(signal.weakCpl);
+        const ratio = signal.cplRatio === null ? "без результатів" : `${signal.cplRatio.toFixed(1)}×`;
+        const body =
+          `${severity === "critical" ? "🔴" : "🟠"} <b>AD SET З ГІРШИМИ ПОКАЗНИКАМИ ЗАБИРАЄ БЮДЖЕТ</b>\n\n` +
+          `Проєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\n` +
+          `Campaign: <b>${escapeTelegramHtml(signal.campaignName)}</b>\n` +
+          `🔴 ${escapeTelegramHtml(signal.weakAdsetName)}: <b>${signal.weakResults} results · ${weakCpl}</b>\n` +
+          `🟢 ${escapeTelegramHtml(signal.winnerAdsetName)}: <b>${signal.winnerResults} results · ${money(signal.winnerCpl)}</b>\n` +
+          `Період: <b>${periodLabel(creativeWindow.since, creativeWindow.until)}</b>\n\n` +
+          `Слабший ad set забрав <b>${Math.round(signal.weakSpendShare * 100)}%</b> spend при CPL ${ratio} гіршому за сильніший. Перевірити розподіл бюджету.`;
+
+        summary.notifications += await sendActionable(config, {
+          key: `adset_budget_drain_v1:${signal.campaignId}:${signal.weakAdsetId}`,
+          type: "ADSET_BUDGET_DRAIN_V1",
+          severity,
+          title: `Слабкий ad set забирає бюджет — ${signal.weakAdsetName}`,
+          body,
+          details: {
+            ...signal,
+            actionType: actionByCampaign.get(signal.campaignId),
             period: creativeWindow,
           },
         });
