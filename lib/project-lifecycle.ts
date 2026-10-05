@@ -89,7 +89,6 @@ export async function endProjectCooperation(metaAccountId: string, endedBy = "da
         body: JSON.stringify({
           resolved_at: now,
           updated_at: now,
-          details: { lifecycle_resolution: "cooperation_ended" },
         }),
       },
     ),
