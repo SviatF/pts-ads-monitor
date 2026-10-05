@@ -7,6 +7,7 @@ import { dayIndexInPeriod, periodForDate, periodLength } from "@/lib/report-peri
 import { performanceMention, sendPerformanceMessage } from "@/lib/performance-telegram";
 import { ensurePerformanceAlertPersonalTask } from "@/lib/performance-personal-task-sync";
 import { analyzeAdsetBudgetDrain } from "@/lib/adset-budget-drain";
+import { formatCurrencyAmount } from "@/lib/report-currency";
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v26.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -333,7 +334,7 @@ export async function runPerformanceMonitor() {
         if ((cplBad || volumeBad) && !changed && !todayRecovered) {
           const severe = (diag.cplChange >= Number(config.cpl_critical_pct || 40) / 100 && diag.cplChange >= 0.6) || volumeDrop >= 0.65;
           const diagnosisLine = `CPM ${pctDelta(diag.cpmChange)} · CTR ${pctDelta(diag.ctrChange)} · Click→Result CR ${pctDelta(diag.crChange)}`;
-          const body = `${severe ? "🔴" : "🟠"} <b>PERFORMANCE ISSUE / ПОГІРШЕННЯ КАМПАНІЇ</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nCampaign: <b>${escapeTelegramHtml(c.name)}</b>\nRecent 3d CPL: <b>${money(recentCpl)}</b> · Baseline 7d: <b>${money(baselineCpl)}</b>\nCPL: <b>${pctDelta(diag.cplChange)}</b> · Results/day: <b>${recentDaily.toFixed(1)}</b> vs ${baselineDaily.toFixed(1)}\n${diagnosisLine}\n\nЙмовірна причина / Likely cause: <b>${escapeTelegramHtml(diag.reason)}</b>\nConfidence: <b>${diag.confidence}</b>`;
+          const body = `${severe ? "🔴" : "🟠"} <b>PERFORMANCE ISSUE / ПОГІРШЕННЯ КАМПАНІЇ</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nCampaign: <b>${escapeTelegramHtml(c.name)}</b>\nRecent 3d CPL: <b>${money(recentCpl, config.reporting?.currency)}</b> · Baseline 7d: <b>${money(baselineCpl, config.reporting?.currency)}</b>\nCPL: <b>${pctDelta(diag.cplChange)}</b> · Results/day: <b>${recentDaily.toFixed(1)}</b> vs ${baselineDaily.toFixed(1)}\n${diagnosisLine}\n\nЙмовірна причина / Likely cause: <b>${escapeTelegramHtml(diag.reason)}</b>\nConfidence: <b>${diag.confidence}</b>`;
           summary.notifications += await sendActionable(config, { key: `performance_incident_v4:${c.id}`, type: "PERFORMANCE_INCIDENT_V4", severity: severe ? "critical" : "action_required", title: `Performance issue — ${c.name}`, body, details: { campaignId: c.id, campaignName: c.name, actionType: c.actionType, recent3: c.recent3, baseline7: c.baseline7, diagnosis: diag, volumeDrop } });
           summary.alerts++;
         } else if ((cplBad || volumeBad) && (changed || todayRecovered)) {
@@ -342,7 +343,7 @@ export async function runPerformanceMonitor() {
 
         const emergencyThreshold = Math.max(20, baselineCpl > 0 ? baselineCpl * 3 : 30);
         if (c.today.results === 0 && c.today.spend >= emergencyThreshold) {
-          summary.notifications += await sendActionable(config, { key: `emergency_no_results_v4:${c.id}`, type: "SPEND_WITHOUT_RESULTS_V4", severity: "critical", emergency: true, title: `Spend без results — ${c.name}`, body: `🚨 <b>EMERGENCY / SPEND БЕЗ RESULTS</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nCampaign: <b>${escapeTelegramHtml(c.name)}</b>\nСьогодні spend: <b>${money(c.today.spend)}</b> · Results: <b>0</b>${baselineCpl > 0 ? `\nНормальний 7d CPL: <b>${money(baselineCpl)}</b>` : ""}`, details: { campaignId: c.id, actionType: c.actionType, today: c.today, baselineCpl } });
+          summary.notifications += await sendActionable(config, { key: `emergency_no_results_v4:${c.id}`, type: "SPEND_WITHOUT_RESULTS_V4", severity: "critical", emergency: true, title: `Spend без results — ${c.name}`, body: `🚨 <b>EMERGENCY / SPEND БЕЗ RESULTS</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nCampaign: <b>${escapeTelegramHtml(c.name)}</b>\nСьогодні spend: <b>${money(c.today.spend, config.reporting?.currency)}</b> · Results: <b>0</b>${baselineCpl > 0 ? `\nНормальний 7d CPL: <b>${money(baselineCpl, config.reporting?.currency)}</b>` : ""}`, details: { campaignId: c.id, actionType: c.actionType, today: c.today, baselineCpl } });
           summary.alerts++;
         }
       }
@@ -449,7 +450,7 @@ export async function runPerformanceMonitor() {
         const severity: "action_required" | "critical" =
           (!Number.isFinite(cplRatio) || cplRatio >= 3) && spendShare >= 0.4 ? "critical" : "action_required";
 
-        const loserCplLabel = loser.results > 0 ? money(loser.cpl) : "0 results";
+        const loserCplLabel = loser.results > 0 ? money(loser.cpl, config.reporting?.currency) : "0 results";
         const ratioLabel = Number.isFinite(cplRatio) ? `${cplRatio.toFixed(1)}×` : "без результатів";
         const adsetName = loser.row.adset_name || rows[0]?.adset_name || "Без назви";
         const body =
@@ -457,7 +458,7 @@ export async function runPerformanceMonitor() {
           `Проєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\n` +
           `Ad Set: <b>${escapeTelegramHtml(adsetName)}</b>\n` +
           `🔴 ${escapeTelegramHtml(loser.row.ad_name || "Без назви")}: <b>${loser.results} results · ${loserCplLabel}</b>\n` +
-          `🟢 ${escapeTelegramHtml(winner.row.ad_name || "Без назви")}: <b>${winner.results} results · ${money(winner.cpl)}</b>\n` +
+          `🟢 ${escapeTelegramHtml(winner.row.ad_name || "Без назви")}: <b>${winner.results} results · ${money(winner.cpl, config.reporting?.currency)}</b>\n` +
           `Період: <b>${periodLabel(creativeWindow.since, creativeWindow.until)}</b>\n\n` +
           `Слабший creative забрав <b>${Math.round(spendShare * 100)}%</b> spend при CPL ${ratioLabel} гіршому за сильніший. Перевірити та обмежити/замінити.`;
 
@@ -497,14 +498,14 @@ export async function runPerformanceMonitor() {
           (signal.cplRatio === null || signal.cplRatio >= 3) && signal.weakSpendShare >= 0.4
             ? "critical"
             : "action_required";
-        const weakCpl = signal.weakCpl === null ? "0 results" : money(signal.weakCpl);
+        const weakCpl = signal.weakCpl === null ? "0 results" : money(signal.weakCpl, config.reporting?.currency);
         const ratio = signal.cplRatio === null ? "без результатів" : `${signal.cplRatio.toFixed(1)}×`;
         const body =
           `${severity === "critical" ? "🔴" : "🟠"} <b>AD SET З ГІРШИМИ ПОКАЗНИКАМИ ЗАБИРАЄ БЮДЖЕТ</b>\n\n` +
           `Проєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\n` +
           `Campaign: <b>${escapeTelegramHtml(signal.campaignName)}</b>\n` +
           `🔴 ${escapeTelegramHtml(signal.weakAdsetName)}: <b>${signal.weakResults} results · ${weakCpl}</b>\n` +
-          `🟢 ${escapeTelegramHtml(signal.winnerAdsetName)}: <b>${signal.winnerResults} results · ${money(signal.winnerCpl)}</b>\n` +
+          `🟢 ${escapeTelegramHtml(signal.winnerAdsetName)}: <b>${signal.winnerResults} results · ${money(signal.winnerCpl, config.reporting?.currency)}</b>\n` +
           `Період: <b>${periodLabel(creativeWindow.since, creativeWindow.until)}</b>\n\n` +
           `Слабший ad set забрав <b>${Math.round(signal.weakSpendShare * 100)}%</b> spend при CPL ${ratio} гіршому за сильніший. Перевірити розподіл бюджету.`;
 
