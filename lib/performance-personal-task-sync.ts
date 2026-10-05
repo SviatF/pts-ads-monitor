@@ -25,10 +25,8 @@ function dueForSeverity(severity: string) {
 }
 
 function actionHint(alertType: string) {
+  if (alertType.includes("CREATIVE_BUDGET_DRAIN")) return "У цьому ad set слабший creative забирає значний бюджет. Перевір розподіл spend і обмеж/заміни слабший creative.";
   if (alertType.includes("SPEND_WITHOUT_RESULTS")) return "Перевір delivery/result event. Якщо tracking OK — зупини або обмеж джерело spend без результатів.";
-  if (alertType.includes("CREATIVE_WASTE")) return "Перевір creative. Якщо waste підтверджений — вимкни/обмеж і перенеси бюджет у сильніші ads.";
-  if (alertType.includes("CREATIVE_FATIGUE")) return "Перевір креативи та підготуй refresh: новий hook/visual/copy.";
-  if (alertType.includes("ADSET_ISSUE")) return "Перевір ad set. Якщо waste підтверджений — обмеж бюджет/перерозподіли без ручного вирівнювання CBO.";
   if (alertType.includes("PERFORMANCE_INCIDENT")) return "Перевір diagnosis у Performance OS і зроби точкову оптимізацію по причині.";
   return "Перевір проблему в Performance OS і зафіксуй виконану дію.";
 }
