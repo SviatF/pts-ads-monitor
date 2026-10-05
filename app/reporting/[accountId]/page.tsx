@@ -4,9 +4,10 @@ import { revalidatePath } from "next/cache";
 import { getStoredAccount } from "@/lib/store";
 import { createProjectReport, REPORTING_GOALS } from "@/lib/google-reporting-user";
 import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
-import { getReportingConfig, upsertReportingConfig } from "@/lib/reporting-store";
+import { getReportingConfig, setReportingCurrency, upsertReportingConfig } from "@/lib/reporting-store";
 import { getPerformanceMonitoringConfig, upsertPerformanceMonitoringConfig } from "@/lib/performance-config-store";
 import { syncMetaReporting } from "@/lib/meta-reporting-sync";
+import { applyReportCurrencyFormats, formatCurrencyAmount, normalizeReportingCurrency, REPORTING_CURRENCIES } from "@/lib/report-currency";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,7 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
     const goalKey = String(formData.get("goalKey") || "sale");
     const customGoal = String(formData.get("customGoal") || "").trim();
     const startDate = String(formData.get("startDate") || todayIso());
+    const currency = normalizeReportingCurrency(String(formData.get("currency") || existing?.currency || "USD"));
     const targetologistTelegram = normalizeTelegramUsername(String(formData.get("targetologistTelegram") || ""));
     const performanceMonitoringEnabled = String(formData.get("performanceMonitoringEnabled") || "") === "1";
     const creativeWasteMinSpend = Number(formData.get("creativeWasteMinSpend") || 15);
@@ -61,12 +63,13 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
     const replacing = String(formData.get("replaceExisting") || "") === "1";
     try {
       const report = await createProjectReport({ projectName, goalKey, customGoal, startDate });
+      await applyReportCurrencyFormats(report.fileId, currency);
       await upsertReportingConfig({
         meta_account_id: currentAccountId,
         project_name: projectName,
         goal_key: goalKey,
         goal_label: report.goalLabel,
-        currency: existing?.currency || null,
+        currency,
         timezone: "Europe/Kyiv",
         report_start_date: report.startDate,
         report_end_date: report.endDate,
@@ -89,6 +92,21 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
       ? "Звіт перестворено. Нову Google-таблицю підключено до проєкту; стара таблиця залишилась без змін як backup."
       : "Звіт створено. Формули та Performance Control активовані.";
     redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent(message)}`);
+  }
+
+  async function saveReportingCurrency(formData: FormData) {
+    "use server";
+    const currency = normalizeReportingCurrency(String(formData.get("currency") || existing?.currency || "USD"));
+    try {
+      if (!existing) throw new Error("Спочатку потрібно створити Google звіт.");
+      await setReportingCurrency(currentAccountId, currency);
+      await applyReportCurrencyFormats(existing.report_file_id, currency);
+      revalidatePath("/");
+      revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
+    } catch (error) {
+      redirect(`/reporting/${encodeURIComponent(currentAccountId)}?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
+    }
+    redirect(`/reporting/${encodeURIComponent(currentAccountId)}?message=${encodeURIComponent(`Валюту звіту змінено на ${currency}. Формат витрат у Google Sheet оновлено.`)}`);
   }
 
   async function savePerformanceControl(formData: FormData) {
@@ -132,9 +150,9 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
       if (!since || !until) throw new Error("Вкажіть період синхронізації.");
       if (since > until) throw new Error("Дата початку не може бути пізніше дати завершення.");
       await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: since });
-      const result = await syncMetaReporting({ accountId: currentAccountId, spreadsheetId: config.report_file_id, since, until });
+      const result = await syncMetaReporting({ accountId: currentAccountId, spreadsheetId: config.report_file_id, since, until, currency: config.currency || "USD" });
       const unmappedPreview = result.unmappedCampaigns.slice(0, 5).join("; ");
-      successMessage = `Meta sync ${since} → ${until}: ${result.insightRows} campaign-day rows; ${result.mappedCampaigns.length} mapped campaigns; results=${result.mappedLeads}; spend=$${result.mappedSpend}; ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
+      successMessage = `Meta sync ${since} → ${until}: ${result.insightRows} campaign-day rows; ${result.mappedCampaigns.length} mapped campaigns; results=${result.mappedLeads}; spend=${formatCurrencyAmount(result.mappedSpend, config.currency || "USD")}; ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
       revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
     } catch (error) {
       redirect(`/reporting/${encodeURIComponent(currentAccountId)}?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
@@ -154,7 +172,7 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
       <div className="setupHero"><div className="eyebrow">PTS Reporting · Project Setup</div><h1>Налаштувати звітність</h1><p className="subtitle">Одна Google Таблиця = один проєкт. Meta автоматично заповнює C (Результат) та E (Витрати), менеджери вручну вносять B/G/H/J/L/M/O, решта KPI та weekly totals рахуються формулами.</p></div>
       <section className="panel setupPanel">
         <div className="panelHead"><div><strong>{account.name}</strong><div className="eyebrow setupAccountId">{account.meta_account_id}</div></div><span className={`statusPill ${existing ? "ok" : "warn"}`}>{existing ? "Reporting configured" : "Needs setup"}</span></div>
-        {existing ? <div className="configuredBox"><div><div className="eyebrow">Поточний звіт</div><h2>{existing.project_name}</h2><p className="subtitle">Кінцева ціль: <strong>{existing.goal_label}</strong>{performanceTelegram ? <> · Таргетолог: <strong>{performanceTelegram}</strong></> : null}</p></div><a className="runButton linkButton" href={existing.report_url} target="_blank" rel="noreferrer">Відкрити Google Sheet</a></div> : null}
+        {existing ? <div className="configuredBox"><div><div className="eyebrow">Поточний звіт</div><h2>{existing.project_name}</h2><p className="subtitle">Кінцева ціль: <strong>{existing.goal_label}</strong> · Валюта: <strong>{normalizeReportingCurrency(existing.currency || "USD")}</strong>{performanceTelegram ? <> · Таргетолог: <strong>{performanceTelegram}</strong></> : null}</p></div><a className="runButton linkButton" href={existing.report_url} target="_blank" rel="noreferrer">Відкрити Google Sheet</a></div> : null}
         {query.error ? <div className="formError">{query.error}</div> : null}
         {query.message ? <div className="empty good">{query.message}</div> : null}
         {existing ? (
@@ -170,6 +188,7 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
           <label><span>Назва проєкту</span><input name="projectName" defaultValue={existing?.project_name || account.name} required /></label>
           <label><span>Telegram таргетолога</span><input name="targetologistTelegram" defaultValue={performanceTelegram} placeholder="@username" required /><small>Цього спеціаліста бот тегатиме у performance-alerts для цього кабінету.</small></label>
           <label><span>Кінцева ціль запусків</span><select name="goalKey" defaultValue={existing?.goal_key || "sale"}>{REPORTING_GOALS.map((goal) => <option key={goal.key} value={goal.key}>{goal.label}</option>)}</select><small>Фінальна ціль автоматично змінюється в weekly, daily та monthly блоках.</small></label>
+          <label><span>Валюта рекламного кабінету</span><select name="currency" defaultValue={normalizeReportingCurrency(existing?.currency || "USD")} required>{REPORTING_CURRENCIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select><small>У цій валюті Meta віддає spend. Вона буде використана у Google Sheet, CPL/CPA та reporting-повідомленнях.</small></label>
           <label><span>Інша ціль, якщо обрано «Інше»</span><input name="customGoal" placeholder="Наприклад: Депозит, Договір, Оплата" /></label>
           <label><span>З якої дати вести звітність проєкту</span><input type="date" name="startDate" defaultValue={existing?.report_start_date || todayIso()} required /><small>Фіксовані 4 періоди місяця: 01–07, 08–15, 16–22, 23–кінець місяця.</small></label>
 
@@ -188,6 +207,7 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
 
           {existing ? (
             <div className="setupActions">
+              <button className="runButton primaryAction" type="submit" formAction={saveReportingCurrency}>Зберегти валюту</button>
               <button className="runButton primaryAction" type="submit" formAction={savePerformanceControl}>Зберегти Performance Control</button>
               <span className="subtitle">Змінюються тільки налаштування моніторингу. Google Sheet, формули та дані менеджерів не чіпаємо.</span>
             </div>
