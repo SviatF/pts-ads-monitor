@@ -91,7 +91,7 @@ async function optionalMetaGraphAll<T>(path: string, params: Record<string, stri
 
 function dateIso(date: Date) { return date.toISOString().slice(0, 10); }
 function daysAgo(days: number) { const d = new Date(); d.setUTCDate(d.getUTCDate() - days); return dateIso(d); }
-function money(value: number) { return `${value.toFixed(2)}`; }
+function money(value: number, currency?: string | null) { return formatCurrencyAmount(value, currency || "USD"); }
 function periodLabel(since: string, until: string) {
   const fmt = (iso: string) => {
     const [, month, day] = iso.split("-");
