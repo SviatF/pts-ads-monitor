@@ -1,3 +1,4 @@
+import { getStoredGoogleRefreshToken, markGoogleOAuthRefreshError, markGoogleOAuthRefreshSuccess } from "@/lib/google-oauth-store";
 const DEFAULT_REDIRECT_URI = "https://pts-ads-monitor.oleg22777.workers.dev/api/google/oauth/callback";
 const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/drive",
@@ -51,7 +52,9 @@ export async function exchangeGoogleCode(code: string) {
 export async function getGoogleUserAccessToken() {
   if (tokenCache && tokenCache.expiresAt > Date.now() + 60_000) return tokenCache.token;
   const cfg = getGoogleOAuthConfig();
-  if (!cfg.clientId || !cfg.clientSecret || !cfg.refreshToken) {
+  const storedRefreshToken = await getStoredGoogleRefreshToken().catch(() => null);
+  const refreshToken = storedRefreshToken || cfg.refreshToken;
+  if (!cfg.clientId || !cfg.clientSecret || !refreshToken) {
     throw new Error("Google user OAuth is not connected yet.");
   }
   const response = await fetch("https://oauth2.googleapis.com/token", {
@@ -60,14 +63,23 @@ export async function getGoogleUserAccessToken() {
     body: new URLSearchParams({
       client_id: cfg.clientId,
       client_secret: cfg.clientSecret,
-      refresh_token: cfg.refreshToken,
+      refresh_token: refreshToken,
       grant_type: "refresh_token",
     }),
   });
   const text = await response.text();
-  if (!response.ok) throw new Error(`Google OAuth refresh failed (${response.status}): ${text}`);
+  if (!response.ok) {
+    await markGoogleOAuthRefreshError(text).catch(() => undefined);
+    let parsed: { error?: string; error_description?: string } | null = null;
+    try { parsed = JSON.parse(text); } catch {}
+    if (parsed?.error === "invalid_grant") {
+      throw new Error("GOOGLE_OAUTH_RECONNECT_REQUIRED: Google refresh token expired or was revoked.");
+    }
+    throw new Error(`Google OAuth refresh failed (${response.status}): ${text}`);
+  }
   const body = JSON.parse(text) as { access_token: string; expires_in: number };
   tokenCache = { token: body.access_token, expiresAt: Date.now() + body.expires_in * 1000 };
+  await markGoogleOAuthRefreshSuccess().catch(() => undefined);
   return body.access_token;
 }
 
