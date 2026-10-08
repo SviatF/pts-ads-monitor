@@ -4,7 +4,7 @@ import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
 import { syncMetaReporting } from "@/lib/meta-reporting-sync";
 import { listReportingTelegramSubscriptionsForAccount } from "@/lib/reporting-telegram-store";
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
-import { formatCurrencyAmount, normalizeReportingCurrency } from "@/lib/report-currency";
+import { applyReportCurrencyFormats, formatCurrencyAmount, normalizeReportingCurrency } from "@/lib/report-currency";
 
 export const dynamic = "force-dynamic";
 
@@ -122,6 +122,10 @@ export async function GET(request: Request) {
         const repairSince = config.report_start_date > repairSinceCandidate
           ? config.report_start_date
           : repairSinceCandidate;
+
+        if (lifecycle.created.length) {
+          await applyReportCurrencyFormats(config.report_file_id, config.currency || "USD");
+        }
 
         const sync = await syncMetaReporting({
           accountId: config.meta_account_id,
