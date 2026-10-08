@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { listReportingConfigs } from "@/lib/reporting-store";
-import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
-import { syncMetaReporting } from "@/lib/meta-reporting-sync";
+import { runReportingSync } from "@/lib/reporting-runner";
 import { listReportingTelegramSubscriptionsForAccount } from "@/lib/reporting-telegram-store";
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
-import { applyReportCurrencyFormats, formatCurrencyAmount, normalizeReportingCurrency } from "@/lib/report-currency";
+import { formatCurrencyAmount, normalizeReportingCurrency } from "@/lib/report-currency";
 
 export const dynamic = "force-dynamic";
 
@@ -106,47 +105,22 @@ export async function GET(request: Request) {
     if (index > 0) await sleep(PROJECT_PACING_MS);
 
     try {
-      const operation = await withSheetsRateLimitRetry(config.project_name, async () => {
-        const lifecycle = await ensureProjectReportLifecycle({
-          spreadsheetId: config.report_file_id,
-          projectName: config.project_name,
-          goalKey: config.goal_key,
-          goalLabel: config.goal_label,
-          reportingStartDate: config.report_start_date,
-        });
-
-        // Repair a rolling 16-day window on every morning sync. This covers the
-        // current reporting period plus the previous one and automatically heals
-        // days missed because of OAuth/API outages without touching manager cells.
-        const repairSinceCandidate = shiftDay(date, -15);
-        const repairSince = config.report_start_date > repairSinceCandidate
-          ? config.report_start_date
-          : repairSinceCandidate;
-
-        if (lifecycle.created.length) {
-          await applyReportCurrencyFormats(config.report_file_id, config.currency || "USD");
-        }
-
-        const sync = await syncMetaReporting({
-          accountId: config.meta_account_id,
-          spreadsheetId: config.report_file_id,
-          since: repairSince,
+      const operation = await withSheetsRateLimitRetry(config.project_name, () =>
+        runReportingSync(config, {
+          since: date,
           until: date,
-          currency: config.currency || "USD",
-        });
-
-        return { lifecycle, sync, repairSince };
-
-      });
+          lifecycleStartDate: config.report_start_date,
+        }),
+      );
 
       if (operation.retried) quotaRetries += 1;
-      const { lifecycle, sync, repairSince } = operation.value;
+      const { lifecycle, result: sync } = operation.value;
 
       const subscriptions = await listReportingTelegramSubscriptionsForAccount(config.meta_account_id);
       const createdText = lifecycle.created.length
         ? `\nНові аркуші: <b>${escapeTelegramHtml(lifecycle.created.join(", "))}</b>`
         : "";
-      const message = `✅ <b>Звіт заповнено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nКабінет: <code>${escapeTelegramHtml(config.meta_account_id)}</code>\nРезультати за день: <b>${sync.untilLeads}</b>\nSpend за день: <b>${formatCurrencyAmount(sync.untilSpend, config.currency || "USD")}</b>\nSelf-heal: <b>${uaDate(repairSince)}–${uaDate(date)}</b>${createdText}\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`;
+      const message = `✅ <b>Звіт заповнено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nКабінет: <code>${escapeTelegramHtml(config.meta_account_id)}</code>\nРезультати: <b>${sync.mappedLeads}</b>\nSpend: <b>${formatCurrencyAmount(sync.mappedSpend, config.currency || "USD")}</b>${createdText}\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`;
 
       for (const subscription of subscriptions) await notify(subscription.telegram_chat_id, message);
 
@@ -162,9 +136,8 @@ export async function GET(request: Request) {
         project: config.project_name,
         date,
         created: lifecycle.created,
-        leads: sync.untilLeads,
-        spend: sync.untilSpend,
-        repairSince,
+        leads: sync.mappedLeads,
+        spend: sync.mappedSpend,
         currency: normalizeReportingCurrency(config.currency || "USD"),
         chatsNotified: subscriptions.length,
         quotaRetried: operation.retried,
