@@ -36,7 +36,7 @@ export default async function Dashboard() {
   let reportingConfigs = [] as Awaited<ReturnType<typeof listReportingConfigs>>;
   let monitoringConfigs = [] as Awaited<ReturnType<typeof listPerformanceMonitoringConfigs>>;
   let endedProjects = [] as Awaited<ReturnType<typeof listEndedProjects>>;
-  let googleOAuthStatus = null as Awaited<ReturnType<typeof getGoogleOAuthStatus>>;
+  let googleOAuthStatus: Awaited<ReturnType<typeof getGoogleOAuthStatus>> | null = null;
   let rejectedCount = 0;
   let error = "";
 
