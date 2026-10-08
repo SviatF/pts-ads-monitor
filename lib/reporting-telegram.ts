@@ -9,7 +9,7 @@ import {
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
 import { acknowledgePerformanceAlert, resolvePerformanceAlert, addPerformanceAlertNote } from "@/lib/performance-alert-store";
 import { runPerformanceMonitor } from "@/lib/performance-monitor-v4";
-import { formatCurrencyAmount } from "@/lib/report-currency";
+import { applyReportCurrencyFormats, formatCurrencyAmount } from "@/lib/report-currency";
 import { sendPerformanceBrief } from "@/lib/performance-brief";
 import { sendDailyPerformanceTasks } from "@/lib/performance-tasks-v2";
 import { sendManagementEscalations, sendRecurringProblemReport, sendWeeklyTeamScorecard } from "@/lib/performance-operations";
@@ -234,7 +234,10 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
     for (const target of targets) {
       const config = await getReportingConfig(target.meta_account_id);
       if (!config) continue;
-      await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: config.report_start_date });
+      const lifecycle = await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: config.report_start_date });
+      if (lifecycle.created.length) {
+        await applyReportCurrencyFormats(config.report_file_id, config.currency || "USD");
+      }
       const repairSinceCandidate = shiftIsoDay(date, -15);
       const repairSince = config.report_start_date > repairSinceCandidate
         ? config.report_start_date
