@@ -210,7 +210,7 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
         {existing ? (
           <form action={syncMeta} className="setupForm">
             <div className="eyebrow">Meta Ads → Reporting</div><h2>Синхронізувати звіт</h2>
-            <p className="subtitle">Працює тією ж логікою, що й автоматичний sync о 09:00, тільки одразу за вибраний період. Канали: Direct/Messenger → Direct / Messenger; LeadForm/Leads-Form/Lead Form/legacy Leads → Lead Form; Quiz → Quiz; Site/Website/Web → Site. Невідомі campaign names не записуються навмання.</p>
+            <p className="subtitle">Працює тією ж логікою, що й автоматичний sync о 09:00, тільки одразу за вибраний період. Канали: Direct/Messenger → Direct / Messenger; LeadForm/Leads-Form/Lead Form/legacy Leads → Lead Form; Quiz → Quiz; Site/Website/Web → Site. Невідомі campaign names не записуються навмання. Кнопка оновлює тільки автоматичні Meta-поля C (Результат) та E (Витрати); ручні B/G/H/J/L/M/O не змінюються.</p>
             <label><span>Період від</span><input type="date" name="since" defaultValue={previousMonth.since} required /></label>
             <label><span>Період до</span><input type="date" name="until" defaultValue={previousMonth.until} required /></label>
             <div className="setupActions"><button className="runButton primaryAction" type="submit">Синхронізувати звіт</button></div>
