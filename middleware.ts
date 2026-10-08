@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+function isPublicPage(pathname: string) {
+  return pathname === "/about" || pathname === "/privacy" || pathname === "/terms";
+}
+
 function isPublicApi(pathname: string) {
   if (pathname === "/api/telegram") return true;
   if (pathname === "/api/telegram/audit") return true;
@@ -29,7 +33,7 @@ export async function middleware(request: NextRequest) {
     } catch {}
   }
 
-  if (isPublicApi(pathname)) return NextResponse.next();
+  if (isPublicPage(pathname) || isPublicApi(pathname)) return NextResponse.next();
 
   const password = process.env.DASHBOARD_PASSWORD;
   if (!password) return NextResponse.next();
