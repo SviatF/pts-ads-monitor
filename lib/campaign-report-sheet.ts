@@ -67,10 +67,9 @@ async function getSheets(spreadsheetId: string) {
   return body.sheets || [];
 }
 
-async function ensureSheet(spreadsheetId: string, title: string) {
-  const sheets = await getSheets(spreadsheetId);
-  const existing = sheets.find((sheet) => sheet.properties.title === title);
-  if (existing) return existing.properties.sheetId;
+async function ensureSheet(spreadsheetId: string, title: string, sheetIds: Map<string, number>) {
+  const existing = sheetIds.get(title);
+  if (typeof existing === "number") return existing;
 
   const created = await googleJson<{
     replies?: Array<{ addSheet?: { properties?: { sheetId?: number } } }>;
@@ -82,6 +81,7 @@ async function ensureSheet(spreadsheetId: string, title: string) {
   });
   const sheetId = created.replies?.[0]?.addSheet?.properties?.sheetId;
   if (typeof sheetId !== "number") throw new Error(`Could not create campaign sheet ${title}`);
+  sheetIds.set(title, sheetId);
   return sheetId;
 }
 
@@ -222,10 +222,14 @@ export async function syncCampaignPerformanceSheets(spreadsheetId: string, rows:
     byMonth.set(month, list);
   }
 
+  // One metadata read for all campaign month sheets in this sync.
+  const existingSheets = await getSheets(spreadsheetId);
+  const sheetIds = new Map(existingSheets.map((sheet) => [sheet.properties.title, sheet.properties.sheetId]));
+
   const sheets: Array<{ title: string; rows: number }> = [];
   for (const [month, monthRows] of byMonth) {
     const title = sheetTitle(month);
-    const sheetId = await ensureSheet(spreadsheetId, title);
+    const sheetId = await ensureSheet(spreadsheetId, title, sheetIds);
     await clearSheet(spreadsheetId, title);
     const built = buildValues(month, monthRows);
     await writeValues(spreadsheetId, title, built.values);
