@@ -235,9 +235,9 @@ async function writeMonthlySheet(input: { spreadsheetId: string; projectName: st
   const monthPeriods = fourPeriodsForMonth(month);
   const columns = "ABCDEFGHIJKLMNOPQR".split("");
   const monthlyBlocks = PTS_REPORT_TEMPLATE.daily.blocks.slice(0, 4);
-  const activeBlockRows = monthlyBlocks
-    .map((block, index) => availableWeeklyTitles.has(monthPeriods[index]?.title || "") ? block.dataStartRow : null)
-    .filter((row): row is number => row !== null);
+  const activeBlockRows: number[] = monthlyBlocks.flatMap((block, index) =>
+    availableWeeklyTitles.has(monthPeriods[index]?.title || "") ? [Number(block.dataStartRow)] : [],
+  );
 
   // The monthly top block is intentionally calculated from the four lower
   // weekly-summary blocks on the SAME monthly sheet. The lower blocks mirror
