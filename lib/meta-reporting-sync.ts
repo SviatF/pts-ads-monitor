@@ -120,8 +120,6 @@ function monthStartIso(iso: string) {
 
 export async function syncMetaReporting(input: { accountId: string; spreadsheetId: string; since: string; until: string; currency?: string | null }) {
   const currency = normalizeReportingCurrency(input.currency || "USD");
-  await applyReportFormulas(input.spreadsheetId);
-  await applyReportCurrencyFormats(input.spreadsheetId, currency);
 
   const objectId = input.accountId.startsWith("act_") ? input.accountId : `act_${input.accountId}`;
   const insights = await metaGraphAll<MetaInsight>(`${objectId}/insights`, {
