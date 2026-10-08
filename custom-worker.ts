@@ -6,9 +6,6 @@ type Env = {
   [key: string]: unknown;
 };
 
-// Temporary integrity freeze: do not mutate reporting Sheets from cron until
-// the historical data is audited against Meta and the write path is restored.
-const REPORTING_WRITES_PAUSED = true;
 
 function hydrateProcessEnv(env: Env) {
   for (const [key, value] of Object.entries(env || {})) {
@@ -70,23 +67,9 @@ export default {
       tasks.push(callInternal("/api/performance/management?kind=escalations", env, ctx));
     }
 
-    // Reporting repair queue: process two configured projects per cron tick until
-    // the one-time full audit/backfill queue is healthy. Skip the 09:00 reporting
-    // window so repair traffic never competes with the morning sync quota.
-    if (!REPORTING_WRITES_PAUSED && !(hour === 9 && minute < 20)) {
-      tasks.push(callInternal("/api/reporting/repair?limit=2", env, ctx));
-    }
-
-    // Reporting sheet lifecycle: shortly after midnight Europe/Kyiv create/repair
-    // the active reporting period independently from the 09:00 data sync.
-    // This makes the new tab available to managers from the start of the day.
-    if (!REPORTING_WRITES_PAUSED && hour === 0 && minute < 10) {
-      tasks.push(callInternal("/api/reporting/lifecycle", env, ctx));
-    }
-
-    // At 09:00 Europe/Kyiv run lifecycle catch-up -> previous-day Meta sync -> Telegram status.
-    // The morning endpoint keeps lifecycle as a second safety net in case midnight failed.
-    if (!REPORTING_WRITES_PAUSED && hour === 9 && minute < 10) {
+    // At 09:00 Europe/Kyiv use one reporting path:
+    // create the current weekly/monthly sheet if needed, then sync only yesterday.
+    if (hour === 9 && minute < 10) {
       tasks.push(callInternal("/api/reporting/morning", env, ctx));
     }
 
