@@ -80,3 +80,11 @@ export async function markGoogleOAuthRefreshError(message: string) {
     }),
   });
 }
+
+
+export async function getGoogleOAuthStatus() {
+  const rows = await request<Array<Pick<GoogleOAuthRow, "connected_at" | "last_refresh_at" | "last_error" | "updated_at">>>(
+    "google_oauth_credentials?select=connected_at,last_refresh_at,last_error,updated_at&id=eq.primary&limit=1",
+  );
+  return rows[0] || null;
+}
