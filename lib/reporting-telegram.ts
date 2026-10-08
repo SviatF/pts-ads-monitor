@@ -23,12 +23,18 @@ function normalizeAccountId(value: string) {
   return value.trim().replace(/^act_/i, "");
 }
 
+function shiftIsoDay(iso: string, delta: number) {
+  const [year, month, day] = iso.split("-").map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  value.setUTCDate(value.getUTCDate() + delta);
+  return value.toISOString().slice(0, 10);
+}
+
 function yesterdayKyivIso(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const local = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)));
-  local.setUTCDate(local.getUTCDate() - 1);
-  return local.toISOString().slice(0, 10);
+  const today = `${values.year}-${values.month}-${values.day}`;
+  return shiftIsoDay(today, -1);
 }
 
 function uaDate(iso: string) {
@@ -229,10 +235,20 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
       const config = await getReportingConfig(target.meta_account_id);
       if (!config) continue;
       await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: config.report_start_date });
-      const result = await syncMetaReporting({ accountId: config.meta_account_id, spreadsheetId: config.report_file_id, since: date, until: date, currency: config.currency || "USD" });
+      const repairSinceCandidate = shiftIsoDay(date, -15);
+      const repairSince = config.report_start_date > repairSinceCandidate
+        ? config.report_start_date
+        : repairSinceCandidate;
+      const result = await syncMetaReporting({
+        accountId: config.meta_account_id,
+        spreadsheetId: config.report_file_id,
+        since: repairSince,
+        until: date,
+        currency: config.currency || "USD",
+      });
       await sendTelegramToChat(
         chatId,
-        `✅ <b>Звіт оновлено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nРезультати: <b>${result.mappedLeads}</b>\nВитрати: <b>${formatCurrencyAmount(result.mappedSpend, config.currency || "USD")}</b>\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
+        `✅ <b>Звіт оновлено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nРезультати за день: <b>${result.untilLeads}</b>\nВитрати за день: <b>${formatCurrencyAmount(result.untilSpend, config.currency || "USD")}</b>\nВідновлено Meta-дані: <b>${uaDate(repairSince)}–${uaDate(date)}</b>\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
       );
     }
     return true;
