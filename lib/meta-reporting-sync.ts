@@ -113,6 +113,11 @@ function channelLabel(channel: Channel | null) {
   return "Unmapped";
 }
 
+function monthStartIso(iso: string) {
+  const [year, month] = iso.split("-");
+  return `${year}-${month}-01`;
+}
+
 export async function syncMetaReporting(input: { accountId: string; spreadsheetId: string; since: string; until: string; currency?: string | null }) {
   const currency = normalizeReportingCurrency(input.currency || "USD");
   await applyReportFormulas(input.spreadsheetId);
@@ -131,9 +136,10 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
   const unmapped = new Set<string>();
   const mappedCampaigns = new Set<string>();
   const resultActionTypes = new Map<string, number>();
-  const campaignRows: CampaignPerformanceRow[] = [];
   let mappedSpend = 0;
   let mappedLeads = 0;
+  let untilSpend = 0;
+  let untilLeads = 0;
 
   for (const insight of insights) {
     const name = insight.campaign_name || "(unnamed campaign)";
@@ -141,15 +147,6 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
     const spend = Number(insight.spend || 0);
     const mappedResult = channel ? resultCount(channel, insight.actions) : null;
     const detailResults = mappedResult ? mappedResult.value : genericResultCount(insight.actions);
-
-    campaignRows.push({
-      date: insight.date_start,
-      campaignId: insight.campaign_id || name,
-      campaignName: name,
-      channel: channelLabel(channel),
-      spend,
-      results: detailResults,
-    });
 
     if (!channel) {
       unmapped.add(name);
@@ -162,6 +159,10 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
     mappedCampaigns.add(name);
     mappedSpend += spend;
     mappedLeads += leads;
+    if (insight.date_start === input.until) {
+      untilSpend += spend;
+      untilLeads += leads;
+    }
     const key = `${insight.date_start}|${channel}`;
     const current = aggregate.get(key) || { leads: 0, spend: 0 };
     current.leads += leads;
@@ -192,6 +193,32 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
 
   await googleValuesBatchUpdate(input.spreadsheetId, data);
   await applyReportFormulas(input.spreadsheetId);
+
+  // Campaign detail sheets are rebuilt from a complete month window, not from
+  // only the most recent daily sync. Previously the sheet was cleared and then
+  // rewritten with just one day, which made month/week totals collapse to the
+  // last synced date.
+  const campaignDetailSince = monthStartIso(input.since);
+  const campaignInsights = await metaGraphAll<MetaInsight>(`${objectId}/insights`, {
+    level: "campaign",
+    fields: "campaign_id,campaign_name,spend,actions,date_start,date_stop",
+    time_increment: "1",
+    time_range: JSON.stringify({ since: campaignDetailSince, until: input.until }),
+    limit: "500",
+  });
+  const campaignRows: CampaignPerformanceRow[] = campaignInsights.map((insight) => {
+    const name = insight.campaign_name || "(unnamed campaign)";
+    const channel = mapCampaignToChannel(name);
+    return {
+      date: insight.date_start,
+      campaignId: insight.campaign_id || name,
+      campaignName: name,
+      channel: channelLabel(channel),
+      spend: Number(insight.spend || 0),
+      results: channel ? resultCount(channel, insight.actions).value : genericResultCount(insight.actions),
+    };
+  });
+
   const campaignDetail = await syncCampaignPerformanceSheets(input.spreadsheetId, campaignRows, currency);
   await applyReportCurrencyFormats(input.spreadsheetId, currency);
 
@@ -202,6 +229,8 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
     resultActionTypes: [...resultActionTypes.entries()].map(([actionType, rows]) => ({ actionType, rows })),
     mappedSpend: Number(mappedSpend.toFixed(2)),
     mappedLeads,
+    untilSpend: Number(untilSpend.toFixed(2)),
+    untilLeads,
     cellsWritten: data.length,
     campaignDetail,
     since: input.since,
