@@ -1,4 +1,5 @@
 import { PTS_REPORT_TEMPLATE, dailyBlocksForDays } from "@/lib/report-template";
+import { applyReportFormulas } from "@/lib/report-formulas";
 import {
   addMonths,
   endOfMonth,
@@ -332,6 +333,9 @@ export async function createProjectReport(input: { projectName: string; goalKey:
   const fileName = `${input.projectName} × PTS | PERFORMANCE REPORT`;
   const copied = await googleJson<{ id: string; name: string; webViewLink?: string }>(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(cfg.templateFileId)}/copy?supportsAllDrives=true&fields=id,name,webViewLink`, { method: "POST", body: JSON.stringify({ name: fileName, ...(cfg.reportsFolderId ? { parents: [cfg.reportsFolderId] } : {}) }) });
   await ensureProjectReportLifecycle({ spreadsheetId: copied.id, projectName: input.projectName, goalKey: input.goalKey, customGoal: input.customGoal, reportingStartDate: input.startDate });
+  // A newly created report must be usable immediately, not only after the next
+  // scheduled lifecycle/morning sync.
+  await applyReportFormulas(copied.id);
   const start = parseIsoDate(input.startDate);
   const initialPeriod = periodForDate(start);
   return { fileId: copied.id, url: copied.webViewLink || `https://docs.google.com/spreadsheets/d/${copied.id}/edit`, goalLabel: labels.column, startDate: input.startDate, endDate: isoDate(initialPeriod.end) };
