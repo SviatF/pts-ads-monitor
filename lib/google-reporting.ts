@@ -233,9 +233,26 @@ async function createMonthlySheet(input: { spreadsheetId: string; masterSheetId:
   await valuesBatchUpdate(spreadsheetId, data);
 }
 
+function kyivCalendarDate(now: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Kyiv",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return new Date(Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+  ));
+}
+
 export async function ensureProjectReportLifecycle(input: { spreadsheetId: string; projectName: string; goalKey: string; goalLabel?: string; customGoal?: string; reportingStartDate: string; now?: Date }) {
   const now = input.now || new Date();
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  // Reporting periods are business-calendar periods in Europe/Kyiv.
+  // Do not derive them from UTC midnight because Kyiv may already be on the next day.
+  const today = kyivCalendarDate(now);
   const reportingStart = parseIsoDate(input.reportingStartDate);
   const labels = goalLabels(input.goalKey, input.customGoal || input.goalLabel);
   const masterSheetId = await ensureMasterSheet(input.spreadsheetId);
