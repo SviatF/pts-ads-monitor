@@ -5,6 +5,7 @@ import { listReportingConfigs } from "@/lib/reporting-store";
 import { listPerformanceMonitoringConfigs } from "@/lib/performance-config-store";
 import { runMonitor } from "@/lib/run-monitor";
 import { endProjectCooperation, listEndedProjects } from "@/lib/project-lifecycle";
+import { getGoogleOAuthStatus } from "@/lib/google-oauth-store";
 
 export const dynamic = "force-dynamic";
 
@@ -35,16 +36,18 @@ export default async function Dashboard() {
   let reportingConfigs = [] as Awaited<ReturnType<typeof listReportingConfigs>>;
   let monitoringConfigs = [] as Awaited<ReturnType<typeof listPerformanceMonitoringConfigs>>;
   let endedProjects = [] as Awaited<ReturnType<typeof listEndedProjects>>;
+  let googleOAuthStatus = null as Awaited<ReturnType<typeof getGoogleOAuthStatus>>;
   let rejectedCount = 0;
   let error = "";
 
   try {
-    [accounts, rejectedCount, reportingConfigs, monitoringConfigs, endedProjects] = await Promise.all([
+    [accounts, rejectedCount, reportingConfigs, monitoringConfigs, endedProjects, googleOAuthStatus] = await Promise.all([
       listStoredAccounts(),
       countRejectedAds(),
       listReportingConfigs(),
       listPerformanceMonitoringConfigs(),
       listEndedProjects(),
+      getGoogleOAuthStatus(),
     ]);
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
@@ -113,6 +116,18 @@ export default async function Dashboard() {
             <div className="card metricCard amberCard"><div className="metricIcon">▣</div><div><div className="eyebrow">Performance</div><div className={`metric ${monitoringEnabled ? "ok" : "warn"}`}>{monitoringEnabled}</div><div className="metricHint">Accounts with Performance Control</div></div></div>
             <div className="card metricCard violetCard"><div className="metricIcon">▤</div><div><div className="eyebrow">Reporting</div><div className="metric">{configuredReporting.length}</div><div className="metricHint">Accounts with PTS Google reporting</div></div></div>
           </section>
+
+          {googleOAuthStatus?.last_error ? (
+            <section className="panel" style={{ marginBottom: 12, borderColor: "rgba(255,91,120,.4)" }}>
+              <div className="panelHead">
+                <div>
+                  <strong className="bad">Google OAuth потребує уваги</strong>
+                  <div className="eyebrow panelSub">Reporting не зможе оновлювати Google Sheets, доки Google account не буде перепідключено.</div>
+                </div>
+                <a className="runButton dangerAction" href="/api/google/oauth/start">Перепідключити Google</a>
+              </div>
+            </section>
+          ) : null}
 
           {needsSetup.length > 0 ? (
             <section className="panel newAccountsPanel">
