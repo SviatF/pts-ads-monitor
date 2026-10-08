@@ -259,6 +259,32 @@ function kyivCalendarDate(now: Date) {
   ));
 }
 
+export async function getExistingReportingCoverage(spreadsheetId: string, now = new Date()) {
+  const titles = new Set((await getSheets(spreadsheetId)).map((sheet) => sheet.properties.title));
+  const today = kyivCalendarDate(now);
+  const currentMonth = startOfMonth(today);
+  let month = addMonths(currentMonth, -18);
+  let earliest: Date | null = null;
+  let latest: Date | null = null;
+  const weeklyTitles: string[] = [];
+
+  while (month <= currentMonth) {
+    for (const period of fourPeriodsForMonth(month)) {
+      if (!titles.has(period.title)) continue;
+      weeklyTitles.push(period.title);
+      if (!earliest || period.start < earliest) earliest = period.start;
+      if (!latest || period.end > latest) latest = period.end;
+    }
+    month = addMonths(month, 1);
+  }
+
+  return {
+    since: earliest ? isoDate(earliest) : null,
+    until: latest ? isoDate(latest) : null,
+    weeklyTitles,
+  };
+}
+
 export async function ensureProjectReportLifecycle(input: { spreadsheetId: string; projectName: string; goalKey: string; goalLabel?: string; customGoal?: string; reportingStartDate: string; now?: Date }) {
   const now = input.now || new Date();
   // Reporting periods are business-calendar periods in Europe/Kyiv.
