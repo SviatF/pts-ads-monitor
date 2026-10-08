@@ -23,6 +23,33 @@ function previousMonthRange() {
   return { since: first.toISOString().slice(0, 10), until: last.toISOString().slice(0, 10) };
 }
 
+function isGoogleSheetsRateLimit(error: unknown) {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes("google api failed (429)") ||
+    message.includes("resource_exhausted") ||
+    message.includes("rate_limit_exceeded") ||
+    message.includes("read requests per minute per user")
+  );
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withManualSheetsRetry<T>(operation: () => Promise<T>) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isGoogleSheetsRateLimit(error)) throw error;
+    // Google Sheets per-user read quota resets on the minute window.
+    // Wait once and rerun the complete operation so a manual full-month repair
+    // does not fail halfway with a raw 429.
+    await sleep(65_000);
+    return await operation();
+  }
+}
+
 function normalizeTelegramUsername(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "";
@@ -149,11 +176,26 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
       if (!config) throw new Error("Спочатку потрібно створити Google звіт для цього кабінету.");
       if (!since || !until) throw new Error("Вкажіть період синхронізації.");
       if (since > until) throw new Error("Дата початку не може бути пізніше дати завершення.");
-      const lifecycle = await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: since });
-      if (lifecycle.created.length) {
-        await applyReportCurrencyFormats(config.report_file_id, config.currency || "USD");
-      }
-      const result = await syncMetaReporting({ accountId: currentAccountId, spreadsheetId: config.report_file_id, since, until, currency: config.currency || "USD" });
+      const { result } = await withManualSheetsRetry(async () => {
+        const lifecycle = await ensureProjectReportLifecycle({
+          spreadsheetId: config.report_file_id,
+          projectName: config.project_name,
+          goalKey: config.goal_key,
+          goalLabel: config.goal_label,
+          reportingStartDate: since,
+        });
+        if (lifecycle.created.length) {
+          await applyReportCurrencyFormats(config.report_file_id, config.currency || "USD");
+        }
+        const result = await syncMetaReporting({
+          accountId: currentAccountId,
+          spreadsheetId: config.report_file_id,
+          since,
+          until,
+          currency: config.currency || "USD",
+        });
+        return { lifecycle, result };
+      });
       const unmappedPreview = result.unmappedCampaigns.slice(0, 5).join("; ");
       successMessage = `Meta sync ${since} → ${until}: ${result.insightRows} campaign-day rows; ${result.mappedCampaigns.length} mapped campaigns; results=${result.mappedLeads}; spend=${formatCurrencyAmount(result.mappedSpend, config.currency || "USD")}; ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
       revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
