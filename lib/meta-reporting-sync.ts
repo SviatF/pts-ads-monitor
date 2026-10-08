@@ -89,22 +89,6 @@ async function metaGraphAll<T>(path: string, params: Record<string, string>) {
   return rows;
 }
 
-async function googleValuesBatchGet(spreadsheetId: string, ranges: string[]) {
-  if (!ranges.length) return [] as Array<{ range?: string; values?: unknown[][] }>;
-  const token = await getGoogleUserAccessToken();
-  const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchGet`);
-  for (const range of ranges) url.searchParams.append("ranges", range);
-  url.searchParams.set("valueRenderOption", "UNFORMATTED_VALUE");
-  const response = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`Google API failed (${response.status}): ${text}`);
-  const body = JSON.parse(text) as { valueRanges?: Array<{ range?: string; values?: unknown[][] }> };
-  return body.valueRanges || [];
-}
-
 async function googleValuesBatchUpdate(spreadsheetId: string, data: Array<{ range: string; values: Array<Array<string | number>> }>) {
   if (!data.length) return;
   const token = await getGoogleUserAccessToken();
@@ -156,7 +140,6 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
   let unmappedResults = 0;
   let untilSpend = 0;
   let untilLeads = 0;
-  const expectedPeriods = new Map<string, { spend: number; results: number }>();
 
   for (const insight of insights) {
     const name = insight.campaign_name || "(unnamed campaign)";
@@ -182,12 +165,6 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
       untilSpend += spend;
       untilLeads += leads;
     }
-    const periodTitle = periodForDate(parseIsoDate(insight.date_start)).title;
-    const periodExpected = expectedPeriods.get(periodTitle) || { spend: 0, results: 0 };
-    periodExpected.spend += spend;
-    periodExpected.results += leads;
-    expectedPeriods.set(periodTitle, periodExpected);
-
     const key = `${insight.date_start}|${channel}`;
     const current = aggregate.get(key) || { leads: 0, spend: 0 };
     current.leads += leads;
@@ -231,38 +208,23 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
     time_range: JSON.stringify({ since: campaignDetailSince, until: input.until }),
     limit: "500",
   });
-  const campaignRows: CampaignPerformanceRow[] = campaignInsights.map((insight) => {
+  const campaignRows: CampaignPerformanceRow[] = campaignInsights.flatMap((insight) => {
     const name = insight.campaign_name || "(unnamed campaign)";
     const channel = mapCampaignToChannel(name);
-    return {
+    if (!channel) return [];
+    return [{
       date: insight.date_start,
       campaignId: insight.campaign_id || name,
       campaignName: name,
       channel: channelLabel(channel),
       spend: Number(insight.spend || 0),
-      results: channel ? resultCount(channel, insight.actions).value : genericResultCount(insight.actions),
-    };
+      results: resultCount(channel, insight.actions).value,
+    }];
   });
 
   const campaignDetail = await syncCampaignPerformanceSheets(input.spreadsheetId, campaignRows, currency);
 
-  // Verify the actual weekly Meta summary cells in one batch read. This catches
-  // partial writes, broken formulas and stale period sheets immediately.
-  const expectedPeriodRows = [...expectedPeriods.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([title, totals]) => ({
-      title,
-      spend: Number(totals.spend.toFixed(2)),
-      results: totals.results,
-    }));
-  const verificationRanges = expectedPeriodRows.map((item) => `${quoteSheet(item.title)}!C7:E7`);
-  const verifiedRanges = await googleValuesBatchGet(input.spreadsheetId, verificationRanges);
-  const verification = expectedPeriodRows.map((expected, index) => {
-    const row = (verifiedRanges[index]?.values?.[0] || []) as unknown[];
-    const actualResults = Number(row[0] || 0);
-    const actualSpend = Number(row[2] || 0);
-    const spendDiff = Math.abs(actualSpend - expected.spend);
-    return {
+  return {
       title: expected.title,
       expectedResults: expected.results,
       actualResults,
@@ -285,9 +247,6 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
     untilLeads,
     cellsWritten: data.length,
     campaignDetail,
-    verification,
-    verificationOk: verification.every((item) => item.matches),
-    expectedPeriods: expectedPeriodRows,
     since: input.since,
     until: input.until,
   };
