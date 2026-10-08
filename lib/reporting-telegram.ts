@@ -1,6 +1,5 @@
 import { getReportingConfig } from "@/lib/reporting-store";
-import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
-import { syncMetaReporting } from "@/lib/meta-reporting-sync";
+import { runReportingSync } from "@/lib/reporting-runner";
 import {
   disableReportingTelegramSubscription,
   listReportingTelegramSubscriptions,
@@ -9,7 +8,7 @@ import {
 import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
 import { acknowledgePerformanceAlert, resolvePerformanceAlert, addPerformanceAlertNote } from "@/lib/performance-alert-store";
 import { runPerformanceMonitor } from "@/lib/performance-monitor-v4";
-import { applyReportCurrencyFormats, formatCurrencyAmount } from "@/lib/report-currency";
+import { formatCurrencyAmount } from "@/lib/report-currency";
 import { sendPerformanceBrief } from "@/lib/performance-brief";
 import { sendDailyPerformanceTasks } from "@/lib/performance-tasks-v2";
 import { sendManagementEscalations, sendRecurringProblemReport, sendWeeklyTeamScorecard } from "@/lib/performance-operations";
@@ -234,24 +233,14 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
     for (const target of targets) {
       const config = await getReportingConfig(target.meta_account_id);
       if (!config) continue;
-      const lifecycle = await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: config.report_start_date });
-      if (lifecycle.created.length) {
-        await applyReportCurrencyFormats(config.report_file_id, config.currency || "USD");
-      }
-      const repairSinceCandidate = shiftIsoDay(date, -15);
-      const repairSince = config.report_start_date > repairSinceCandidate
-        ? config.report_start_date
-        : repairSinceCandidate;
-      const result = await syncMetaReporting({
-        accountId: config.meta_account_id,
-        spreadsheetId: config.report_file_id,
-        since: repairSince,
+      const { result } = await runReportingSync(config, {
+        since: date,
         until: date,
-        currency: config.currency || "USD",
+        lifecycleStartDate: config.report_start_date,
       });
       await sendTelegramToChat(
         chatId,
-        `✅ <b>Звіт оновлено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nРезультати за день: <b>${result.untilLeads}</b>\nВитрати за день: <b>${formatCurrencyAmount(result.untilSpend, config.currency || "USD")}</b>\nВідновлено Meta-дані: <b>${uaDate(repairSince)}–${uaDate(date)}</b>\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
+        `✅ <b>Звіт оновлено за ${uaDate(date)}</b>\n\nПроєкт: <b>${escapeTelegramHtml(config.project_name)}</b>\nРезультати: <b>${result.mappedLeads}</b>\nВитрати: <b>${formatCurrencyAmount(result.mappedSpend, config.currency || "USD")}</b>\n\n<a href="${escapeTelegramHtml(config.report_url)}">Відкрити Google Sheet</a>`,
       );
     }
     return true;
