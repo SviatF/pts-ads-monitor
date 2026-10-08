@@ -194,18 +194,32 @@ async function arrangeReportTabs(spreadsheetId: string, sheets: SheetMeta[]) {
   if (updates.length) await batchUpdateSpreadsheet(spreadsheetId, updates);
 }
 
-async function trimMonthlySheets(spreadsheetId: string, sheets: SheetMeta[]) {
-  // Retain the monthly total and exactly four weekly summary sections (ending at row 108).
-  // Weekly sheets and the hidden master are never shortened.
-  const lastMonthlyRow = PTS_REPORT_TEMPLATE.daily.blocks[3].dataEndRow;
+async function normalizeMonthlySheets(spreadsheetId: string, sheets: SheetMeta[]) {
+  // Do not physically delete template rows: other reporting routines can still
+  // address rows 109..168 during synchronization. Hide the unused rows instead.
+  // Restore sheets previously trimmed to 108 rows before hiding the excess.
+  const lastVisibleRow = PTS_REPORT_TEMPLATE.daily.blocks[3].dataEndRow;
+  const minimumRows = PTS_REPORT_TEMPLATE.daily.blocks[6].dataEndRow;
   const requests: unknown[] = [];
   for (const sheet of sheets) {
-    if (!/^МІСЯЦЬ\s+\d{2}\.\d{4}$/i.test(sheet.properties.title)) continue;
+    if (!/^МІСЯЦЬ\\s+\\d{2}\\.\\d{4}$/i.test(sheet.properties.title)) continue;
+    const id = sheet.properties.sheetId;
     const rows = sheet.properties.gridProperties?.rowCount;
-    if (typeof rows === "number" && rows > lastMonthlyRow) {
-      requests.push({ deleteDimension: {
-        range: { sheetId: sheet.properties.sheetId, dimension: "ROWS", startIndex: lastMonthlyRow, endIndex: rows },
-      } });
+    if (typeof rows !== "number") continue;
+    const totalRows = Math.max(rows, minimumRows);
+    if (rows < minimumRows) {
+      requests.push({
+        appendDimension: { sheetId: id, dimension: "ROWS", length: minimumRows - rows },
+      });
+    }
+    if (totalRows > lastVisibleRow) {
+      requests.push({
+        updateDimensionProperties: {
+          range: { sheetId: id, dimension: "ROWS", startIndex: lastVisibleRow, endIndex: totalRows },
+          properties: { hiddenByUser: true },
+          fields: "hiddenByUser",
+        },
+      });
     }
   }
   if (requests.length) await batchUpdateSpreadsheet(spreadsheetId, requests);
@@ -510,7 +524,7 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
   // Order existing and newly created tabs on every lifecycle pass.
   // A single fresh metadata read is needed only when new tabs were created.
   const finalSheets = created.length ? await getSheets(input.spreadsheetId) : sheets;
-  await trimMonthlySheets(input.spreadsheetId, finalSheets);
+  await normalizeMonthlySheets(input.spreadsheetId, finalSheets);
   await arrangeReportTabs(input.spreadsheetId, finalSheets);
 
   return {
