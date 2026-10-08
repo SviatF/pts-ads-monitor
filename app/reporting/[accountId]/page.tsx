@@ -149,7 +149,10 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
       if (!config) throw new Error("Спочатку потрібно створити Google звіт для цього кабінету.");
       if (!since || !until) throw new Error("Вкажіть період синхронізації.");
       if (since > until) throw new Error("Дата початку не може бути пізніше дати завершення.");
-      await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: since });
+      const lifecycle = await ensureProjectReportLifecycle({ spreadsheetId: config.report_file_id, projectName: config.project_name, goalKey: config.goal_key, goalLabel: config.goal_label, reportingStartDate: since });
+      if (lifecycle.created.length) {
+        await applyReportCurrencyFormats(config.report_file_id, config.currency || "USD");
+      }
       const result = await syncMetaReporting({ accountId: currentAccountId, spreadsheetId: config.report_file_id, since, until, currency: config.currency || "USD" });
       const unmappedPreview = result.unmappedCampaigns.slice(0, 5).join("; ");
       successMessage = `Meta sync ${since} → ${until}: ${result.insightRows} campaign-day rows; ${result.mappedCampaigns.length} mapped campaigns; results=${result.mappedLeads}; spend=${formatCurrencyAmount(result.mappedSpend, config.currency || "USD")}; ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
