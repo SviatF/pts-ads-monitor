@@ -202,7 +202,7 @@ async function normalizeMonthlySheets(spreadsheetId: string, sheets: SheetMeta[]
   const minimumRows = PTS_REPORT_TEMPLATE.daily.blocks[6].dataEndRow;
   const requests: unknown[] = [];
   for (const sheet of sheets) {
-    if (!/^МІСЯЦЬ\\s+\\d{2}\\.\\d{4}$/i.test(sheet.properties.title)) continue;
+    if (!/^МІСЯЦЬ\s+\d{2}\.\d{4}$/i.test(sheet.properties.title)) continue;
     const id = sheet.properties.sheetId;
     const rows = sheet.properties.gridProperties?.rowCount;
     if (typeof rows !== "number") continue;
@@ -453,6 +453,10 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
     for (const sheet of hiddenGeneratedSheets) sheet.properties.hidden = false;
   }
 
+  // Heal previously truncated monthly sheets BEFORE any monthly formulas are written.
+  // Otherwise a values:batchUpdate targeting rows 109+ fails with HTTP 400.
+  await normalizeMonthlySheets(input.spreadsheetId, sheets);
+
   let month = startOfMonth(reportingStart);
   const currentMonth = startOfMonth(today);
   while (month <= currentMonth) {
@@ -524,7 +528,8 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
   // Order existing and newly created tabs on every lifecycle pass.
   // A single fresh metadata read is needed only when new tabs were created.
   const finalSheets = created.length ? await getSheets(input.spreadsheetId) : sheets;
-  await normalizeMonthlySheets(input.spreadsheetId, finalSheets);
+  // Newly created monthly sheets also inherit unused template blocks.
+  if (created.some((title) => title.startsWith("МІСЯЦЬ "))) await normalizeMonthlySheets(input.spreadsheetId, finalSheets);
   await arrangeReportTabs(input.spreadsheetId, finalSheets);
 
   return {
