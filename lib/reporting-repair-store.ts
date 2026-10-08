@@ -142,6 +142,7 @@ export async function resetReportingRepairQueue() {
       method: "PATCH",
       body: JSON.stringify({
         status: "pending",
+        attempts: 0,
         last_error: null,
         mismatch_details: null,
         finished_at: null,
