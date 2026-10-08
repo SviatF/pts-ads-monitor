@@ -13,7 +13,7 @@ import {
 } from "@/lib/report-periods";
 
 type GoalPreset = { key: string; label: string; columnLabel: string; focusLabel: string };
-type SheetMeta = { properties: { sheetId: number; title: string; hidden?: boolean; index?: number } };
+type SheetMeta = { properties: { sheetId: number; title: string; hidden?: boolean; index?: number; gridProperties?: { rowCount?: number } } };
 
 export const REPORTING_GOALS: GoalPreset[] = [
   { key: "sale", label: "Продаж", columnLabel: "Продаж", focusLabel: "продаж" },
@@ -95,7 +95,7 @@ function goalLabels(goalKey: string, customGoal?: string) {
 }
 
 async function getSheets(spreadsheetId: string) {
-  const metadata = await googleJson<{ sheets: SheetMeta[] }>(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties(sheetId,title,hidden,index)`);
+  const metadata = await googleJson<{ sheets: SheetMeta[] }>(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties(sheetId,title,hidden,index,gridProperties.rowCount)`);
   return metadata.sheets || [];
 }
 async function batchUpdateSpreadsheet(spreadsheetId: string, requests: unknown[]) {
@@ -149,15 +149,14 @@ async function duplicateFromMaster(spreadsheetId: string, masterSheetId: number,
 // monthly summary, weekly periods newest-first, then campaign breakdown.
 // Keep unrelated tabs after reports and the hidden master at the very end.
 function reportTabSortKey(title: string, knownMonths: Map<string, number>) {
-  const monthly = title.match(/^МІСЯЦЬ\\s+(\\d{2})\\.(\\d{4})$/i);
+  const monthly = title.match(/^МІСЯЦЬ\s+(\d{2})\.(\d{4})$/i);
   if (monthly) return { month: Number(monthly[2]) * 12 + Number(monthly[1]), type: 0, week: 0 };
-  const campaign = title.match(/^КАМПАНІЇ\\s+(\\d{2})\\.(\\d{4})$/i);
+  const campaign = title.match(/^КАМПАНІЇ\s+(\d{2})\.(\d{4})$/i);
   if (campaign) return { month: Number(campaign[2]) * 12 + Number(campaign[1]), type: 2, week: 0 };
-  const weekly = title.match(/^(\\d{2})\\.(\\d{2})[–-](\\d{2})\\.(\\d{2})$/);
+  const weekly = title.match(/^(\d{2})\.(\d{2})[–-](\d{2})\.(\d{2})$/);
   if (weekly && weekly[2] === weekly[4]) {
-    const monthNumber = Number(weekly[2]);
-    const known = knownMonths.get(weekly[2]);
-    if (known !== undefined) return { month: known * 12 + monthNumber, type: 1, week: Number(weekly[1]) };
+    const year = knownMonths.get(weekly[2]);
+    if (year !== undefined) return { month: year * 12 + Number(weekly[2]), type: 1, week: Number(weekly[1]) };
   }
   return null;
 }
@@ -165,12 +164,12 @@ function reportTabSortKey(title: string, knownMonths: Map<string, number>) {
 async function arrangeReportTabs(spreadsheetId: string, sheets: SheetMeta[]) {
   const knownMonths = new Map<string, number>();
   for (const sheet of sheets) {
-    const match = sheet.properties.title.match(/^(?:МІСЯЦЬ|КАМПАНІЇ)\\s+(\\d{2})\\.(\\d{4})$/i);
+    const match = sheet.properties.title.match(/^(?:МІСЯЦЬ|КАМПАНІЇ)\s+(\d{2})\.(\d{4})$/i);
     if (!match) continue;
+    const year = Number(match[2]);
     const old = knownMonths.get(match[1]);
-    if (old === undefined || Number(match[2]) > old) knownMonths.set(match[1], Number(match[2]));
+    if (old === undefined || year > old) knownMonths.set(match[1], year);
   }
-  // Do not guess a year for an orphaned weekly sheet.
   const current = [...sheets].sort((a, b) => (a.properties.index ?? 0) - (b.properties.index ?? 0));
   const desired = [...current].sort((a, b) => {
     const x = reportTabSortKey(a.properties.title, knownMonths);
@@ -193,6 +192,23 @@ async function arrangeReportTabs(spreadsheetId: string, sheets: SheetMeta[]) {
     order.splice(i, 0, id);
   }
   if (updates.length) await batchUpdateSpreadsheet(spreadsheetId, updates);
+}
+
+async function trimMonthlySheets(spreadsheetId: string, sheets: SheetMeta[]) {
+  // Retain the monthly total and exactly four weekly summary sections (ending at row 108).
+  // Weekly sheets and the hidden master are never shortened.
+  const lastMonthlyRow = PTS_REPORT_TEMPLATE.daily.blocks[3].dataEndRow;
+  const requests: unknown[] = [];
+  for (const sheet of sheets) {
+    if (!/^МІСЯЦЬ\s+\d{2}\.\d{4}$/i.test(sheet.properties.title)) continue;
+    const rows = sheet.properties.gridProperties?.rowCount;
+    if (typeof rows === "number" && rows > lastMonthlyRow) {
+      requests.push({ deleteDimension: {
+        range: { sheetId: sheet.properties.sheetId, dimension: "ROWS", startIndex: lastMonthlyRow, endIndex: rows },
+      } });
+    }
+  }
+  if (requests.length) await batchUpdateSpreadsheet(spreadsheetId, requests);
 }
 
 async function expandWeeklySheet(spreadsheetId: string, sheetId: number, days: number) {
@@ -493,7 +509,9 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
 
   // Order existing and newly created tabs on every lifecycle pass.
   // A single fresh metadata read is needed only when new tabs were created.
-  await arrangeReportTabs(input.spreadsheetId, created.length ? await getSheets(input.spreadsheetId) : sheets);
+  const finalSheets = created.length ? await getSheets(input.spreadsheetId) : sheets;
+  await trimMonthlySheets(input.spreadsheetId, finalSheets);
+  await arrangeReportTabs(input.spreadsheetId, finalSheets);
 
   return {
     created,
