@@ -6,7 +6,6 @@ import { listPerformanceMonitoringConfigs } from "@/lib/performance-config-store
 import { runMonitor } from "@/lib/run-monitor";
 import { endProjectCooperation, listEndedProjects } from "@/lib/project-lifecycle";
 import { getGoogleOAuthStatus } from "@/lib/google-oauth-store";
-import { getReportingRepairSummary, resetReportingRepairQueue } from "@/lib/reporting-repair-store";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +18,6 @@ function statusClass(kind: string) {
 async function runMonitorNow() {
   "use server";
   await runMonitor();
-  revalidatePath("/");
-}
-
-async function resetReportingAuditAction() {
-  "use server";
-  await resetReportingRepairQueue();
   revalidatePath("/");
 }
 
@@ -44,19 +37,17 @@ export default async function Dashboard() {
   let monitoringConfigs = [] as Awaited<ReturnType<typeof listPerformanceMonitoringConfigs>>;
   let endedProjects = [] as Awaited<ReturnType<typeof listEndedProjects>>;
   let googleOAuthStatus: Awaited<ReturnType<typeof getGoogleOAuthStatus>> | null = null;
-  let reportingRepair = { rows: [], counts: {} } as Awaited<ReturnType<typeof getReportingRepairSummary>>;
   let rejectedCount = 0;
   let error = "";
 
   try {
-    [accounts, rejectedCount, reportingConfigs, monitoringConfigs, endedProjects, googleOAuthStatus, reportingRepair] = await Promise.all([
+    [accounts, rejectedCount, reportingConfigs, monitoringConfigs, endedProjects, googleOAuthStatus] = await Promise.all([
       listStoredAccounts(),
       countRejectedAds(),
       listReportingConfigs(),
       listPerformanceMonitoringConfigs(),
       listEndedProjects(),
       getGoogleOAuthStatus(),
-      getReportingRepairSummary(),
     ]);
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
@@ -125,46 +116,6 @@ export default async function Dashboard() {
             <div className="card metricCard amberCard"><div className="metricIcon">▣</div><div><div className="eyebrow">Performance</div><div className={`metric ${monitoringEnabled ? "ok" : "warn"}`}>{monitoringEnabled}</div><div className="metricHint">Accounts with Performance Control</div></div></div>
             <div className="card metricCard violetCard"><div className="metricIcon">▤</div><div><div className="eyebrow">Reporting</div><div className="metric">{configuredReporting.length}</div><div className="metricHint">Accounts with PTS Google reporting</div></div></div>
           </section>
-
-          {reportingRepair.rows.length ? (
-            <section className="panel" style={{ marginBottom: 12 }}>
-              <div className="panelHead">
-                <div>
-                  <strong>Reporting Data Audit</strong>
-                  <div className="eyebrow panelSub">
-                    Повний self-heal усіх configured Google reports: Meta → daily/weekly/monthly/campaign sheets → автоматична перевірка totals.
-                  </div>
-                </div>
-                <form action={resetReportingAuditAction}>
-                  <button className="runButton" type="submit">Повторити аудит усіх</button>
-                </form>
-              </div>
-              <div className="reportingActions" style={{ marginTop: 10 }}>
-                <span className="statusPill ok">Healthy {reportingRepair.counts.healthy || 0}</span>
-                <span className="statusPill warn">Pending {reportingRepair.counts.pending || 0}</span>
-                <span className="statusPill warn">Running {reportingRepair.counts.running || 0}</span>
-                <span className="statusPill warn">Mismatch {reportingRepair.counts.mismatch || 0}</span>
-                <span className="statusPill bad">Failed {reportingRepair.counts.failed || 0}</span>
-              </div>
-              <div className="tableWrap" style={{ marginTop: 12 }}>
-                <table>
-                  <thead><tr><th>Project</th><th>Status</th><th>Repair range</th><th>Meta expected</th><th>Sheet verified</th><th>Attempts</th></tr></thead>
-                  <tbody>
-                    {reportingRepair.rows.map((row) => (
-                      <tr key={row.id}>
-                        <td><strong>{row.project_name}</strong></td>
-                        <td className={row.status === "healthy" ? "ok" : row.status === "failed" ? "bad" : "warn"}>{row.status.toUpperCase()}</td>
-                        <td>{row.repair_from || "—"} → {row.repair_to || "—"}</td>
-                        <td>{row.expected_results ?? "—"} results · {row.expected_spend ?? "—"} spend</td>
-                        <td>{row.verified_results ?? "—"} results · {row.verified_spend ?? "—"} spend</td>
-                        <td>{row.attempts}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          ) : null}
 
           {googleOAuthStatus?.last_error ? (
             <section className="panel" style={{ marginBottom: 12, borderColor: "rgba(255,91,120,.4)" }}>
