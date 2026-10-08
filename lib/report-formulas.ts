@@ -136,7 +136,10 @@ export async function applyReportFormulas(spreadsheetId: string) {
   );
 
   const weeklySheets = (metadata.sheets || [])
-    .filter((sheet) => !sheet.properties.hidden && isWeeklySheet(sheet.properties.title))
+    // Formula repair must not depend on visibility. Generated report tabs may
+    // temporarily be hidden (or have been created hidden by an older lifecycle
+    // version), but their formulas still need to be restored.
+    .filter((sheet) => isWeeklySheet(sheet.properties.title))
     .map((sheet) => sheet.properties.title);
 
   const data: ValueUpdate[] = [];
