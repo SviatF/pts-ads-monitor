@@ -230,6 +230,8 @@ async function writeMonthlySheet(input: { spreadsheetId: string; projectName: st
   // This function is intentionally idempotent so lifecycle can refresh an already
   // existing monthly sheet when the next weekly sheet appears.
   const weeklyTitles = weeklyPeriods.map((period) => period.title);
+  const availableWeeklyTitles = new Set(weeklyTitles);
+  const monthPeriods = fourPeriodsForMonth(month);
   const columns = "ABCDEFGHIJKLMNOPQR".split("");
 
   if (weeklyTitles.length) {
@@ -245,8 +247,8 @@ async function writeMonthlySheet(input: { spreadsheetId: string; projectName: st
 
   const monthlyBlocks = PTS_REPORT_TEMPLATE.daily.blocks.slice(0, 4);
   monthlyBlocks.forEach((block, index) => {
-    const period = weeklyPeriods[index];
-    if (!period) {
+    const period = monthPeriods[index];
+    if (!period || !availableWeeklyTitles.has(period.title)) {
       data.push({ range: `${sheet}!A${block.dateRow}`, values: [[""]] });
       return;
     }
