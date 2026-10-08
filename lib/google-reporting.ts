@@ -215,33 +215,63 @@ function cellFormulaForMonthly(column: string, row: number, weeklyTitles: string
   }
 }
 
-async function createMonthlySheet(input: { spreadsheetId: string; masterSheetId: number; projectName: string; month: Date; weeklyPeriods: ReportPeriod[]; goalColumn: string; goalFocus: string }) {
-  const { spreadsheetId, masterSheetId, projectName, month, weeklyPeriods, goalColumn, goalFocus } = input;
+async function writeMonthlySheet(input: { spreadsheetId: string; projectName: string; month: Date; weeklyPeriods: ReportPeriod[]; goalColumn: string; goalFocus: string }) {
+  const { spreadsheetId, projectName, month, weeklyPeriods, goalColumn, goalFocus } = input;
   const title = `МІСЯЦЬ ${monthKey(month)}`;
   const monthEnd = endOfMonth(month);
-  await duplicateFromMaster(spreadsheetId, masterSheetId, title);
-  await clearRanges(spreadsheetId, templateDataRanges(title));
   const sheet = quoteSheet(title);
   const data = commonSheetValues(title, projectName, startOfMonth(month), monthEnd, goalColumn, goalFocus);
   data.push({ range: `${sheet}!A${PTS_REPORT_TEMPLATE.weekly.titleRow}`, values: [["МІСЯЧНА PERFORMANCE-ЗВІТНІСТЬ"]] });
   data.push({ range: `${sheet}!A${PTS_REPORT_TEMPLATE.daily.sectionTitleRow}`, values: [["ТИЖНЕВА ЗВІТНІСТЬ"]] });
+
+  // Monthly report contract:
+  // - top block = formulas summing all available weekly sheets of that month;
+  // - first four lower blocks = one-to-one mirrors of 01–07, 08–15, 16–22, 23–month-end.
+  // This function is intentionally idempotent so lifecycle can refresh an already
+  // existing monthly sheet when the next weekly sheet appears.
   const weeklyTitles = weeklyPeriods.map((period) => period.title);
   const columns = "ABCDEFGHIJKLMNOPQR".split("");
-  for (let row = PTS_REPORT_TEMPLATE.weekly.dataStartRow; row <= PTS_REPORT_TEMPLATE.weekly.dataEndRow; row += 1) {
-    for (const column of columns) {
-      data.push({ range: `${sheet}!${column}${row}`, values: [[column === "A" ? `=${quoteSheet(weeklyTitles[0])}!A${row}` : cellFormulaForMonthly(column, row, weeklyTitles)]] });
+
+  if (weeklyTitles.length) {
+    for (let row = PTS_REPORT_TEMPLATE.weekly.dataStartRow; row <= PTS_REPORT_TEMPLATE.weekly.dataEndRow; row += 1) {
+      for (const column of columns) {
+        data.push({
+          range: `${sheet}!${column}${row}`,
+          values: [[column === "A" ? `=${quoteSheet(weeklyTitles[0])}!A${row}` : cellFormulaForMonthly(column, row, weeklyTitles)]],
+        });
+      }
     }
   }
-  PTS_REPORT_TEMPLATE.daily.blocks.forEach((block, index) => {
+
+  const monthlyBlocks = PTS_REPORT_TEMPLATE.daily.blocks.slice(0, 4);
+  monthlyBlocks.forEach((block, index) => {
     const period = weeklyPeriods[index];
-    if (!period) { data.push({ range: `${sheet}!A${block.dateRow}`, values: [[""]] }); return; }
+    if (!period) {
+      data.push({ range: `${sheet}!A${block.dateRow}`, values: [[""]] });
+      return;
+    }
+
     data.push({ range: `${sheet}!A${block.dateRow}`, values: [[period.title]] });
     for (let sourceRow = PTS_REPORT_TEMPLATE.weekly.dataStartRow; sourceRow <= PTS_REPORT_TEMPLATE.weekly.dataEndRow; sourceRow += 1) {
       const targetRow = block.dataStartRow + (sourceRow - PTS_REPORT_TEMPLATE.weekly.dataStartRow);
-      for (const column of columns) data.push({ range: `${sheet}!${column}${targetRow}`, values: [[`=${quoteSheet(period.title)}!${column}${sourceRow}`]] });
+      for (const column of columns) {
+        data.push({
+          range: `${sheet}!${column}${targetRow}`,
+          values: [[`=${quoteSheet(period.title)}!${column}${sourceRow}`]],
+        });
+      }
     }
   });
+
   await valuesBatchUpdate(spreadsheetId, data);
+}
+
+async function createMonthlySheet(input: { spreadsheetId: string; masterSheetId: number; projectName: string; month: Date; weeklyPeriods: ReportPeriod[]; goalColumn: string; goalFocus: string }) {
+  const { spreadsheetId, masterSheetId, projectName, month, weeklyPeriods, goalColumn, goalFocus } = input;
+  const title = `МІСЯЦЬ ${monthKey(month)}`;
+  await duplicateFromMaster(spreadsheetId, masterSheetId, title);
+  await clearRanges(spreadsheetId, templateDataRanges(title));
+  await writeMonthlySheet({ spreadsheetId, projectName, month, weeklyPeriods, goalColumn, goalFocus });
 }
 
 function kyivCalendarDate(now: Date) {
@@ -332,27 +362,6 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
     for (const sheet of hiddenGeneratedSheets) sheet.properties.hidden = false;
   }
 
-  if (today.getUTCDate() === 1) {
-    const previousMonth = addMonths(startOfMonth(today), -1);
-    if (previousMonth >= startOfMonth(reportingStart)) {
-      const previousPeriods = fourPeriodsForMonth(previousMonth).filter((period) => period.end >= reportingStart);
-      const monthlyTitle = `МІСЯЦЬ ${monthKey(previousMonth)}`;
-      if (previousPeriods.every((period) => existing.has(period.title)) && !existing.has(monthlyTitle)) {
-        await createMonthlySheet({
-          spreadsheetId: input.spreadsheetId,
-          masterSheetId,
-          projectName: input.projectName,
-          month: previousMonth,
-          weeklyPeriods: previousPeriods,
-          goalColumn: labels.column,
-          goalFocus: labels.focus,
-        });
-        existing.add(monthlyTitle);
-        created.push(monthlyTitle);
-      }
-    }
-  }
-
   let month = startOfMonth(reportingStart);
   const currentMonth = startOfMonth(today);
   while (month <= currentMonth) {
@@ -373,21 +382,38 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
       }
     }
 
-    const isClosedMonth = endOfMonth(month) < today;
     const monthlyTitle = `МІСЯЦЬ ${monthKey(month)}`;
-    const availablePeriods = periods.filter((period) => period.end >= reportingStart);
-    if (isClosedMonth && availablePeriods.every((period) => existing.has(period.title)) && !existing.has(monthlyTitle)) {
-      await createMonthlySheet({
-        spreadsheetId: input.spreadsheetId,
-        masterSheetId,
-        projectName: input.projectName,
-        month,
-        weeklyPeriods: availablePeriods,
-        goalColumn: labels.column,
-        goalFocus: labels.focus,
-      });
-      existing.add(monthlyTitle);
-      created.push(monthlyTitle);
+    // Use the weekly sheets that actually exist in the workbook. Do not filter
+    // them by reportingStartDate: older projects can have valid weekly tabs that
+    // pre-date the config row, and excluding them is exactly what caused monthly
+    // reports to mirror only the final week.
+    const availablePeriods = periods.filter((period) => existing.has(period.title));
+
+    if (availablePeriods.length) {
+      if (!existing.has(monthlyTitle)) {
+        await createMonthlySheet({
+          spreadsheetId: input.spreadsheetId,
+          masterSheetId,
+          projectName: input.projectName,
+          month,
+          weeklyPeriods: availablePeriods,
+          goalColumn: labels.column,
+          goalFocus: labels.focus,
+        });
+        existing.add(monthlyTitle);
+        created.push(monthlyTitle);
+      } else {
+        // Refresh formulas every lifecycle pass so when week 2/3/4 appears the
+        // monthly top block and the corresponding lower weekly block pick it up.
+        await writeMonthlySheet({
+          spreadsheetId: input.spreadsheetId,
+          projectName: input.projectName,
+          month,
+          weeklyPeriods: availablePeriods,
+          goalColumn: labels.column,
+          goalFocus: labels.focus,
+        });
+      }
     }
     month = addMonths(month, 1);
   }
