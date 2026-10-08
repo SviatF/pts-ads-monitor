@@ -262,12 +262,29 @@ function kyivCalendarDate(now: Date) {
 export async function ensureProjectReportLifecycle(input: { spreadsheetId: string; projectName: string; goalKey: string; goalLabel?: string; customGoal?: string; reportingStartDate: string; now?: Date }) {
   const now = input.now || new Date();
   // Reporting periods are business-calendar periods in Europe/Kyiv.
-  // Do not derive them from UTC midnight because Kyiv may already be on the next day.
   const today = kyivCalendarDate(now);
   const reportingStart = parseIsoDate(input.reportingStartDate);
   const labels = goalLabels(input.goalKey, input.customGoal || input.goalLabel);
-  const masterSheetId = await ensureMasterSheet(input.spreadsheetId);
-  let sheets = await getSheets(input.spreadsheetId);
+
+  // One metadata read for the whole lifecycle pass. The previous implementation
+  // re-read spreadsheet metadata 4 times per sync, which could exhaust Google's
+  // 60 read requests/min/user quota when many projects ran together.
+  const sheets = await getSheets(input.spreadsheetId);
+  if (!sheets.length) throw new Error("Project report has no worksheet");
+
+  let master = sheets.find((sheet) => sheet.properties.title === MASTER_SHEET_TITLE);
+  if (!master) {
+    master = sheets[0];
+    await batchUpdateSpreadsheet(input.spreadsheetId, [{
+      updateSheetProperties: {
+        properties: { sheetId: master.properties.sheetId, title: MASTER_SHEET_TITLE },
+        fields: "title",
+      },
+    }]);
+    master.properties.title = MASTER_SHEET_TITLE;
+  }
+  const masterSheetId = master.properties.sheetId;
+
   const existing = new Set(sheets.map((sheet) => sheet.properties.title));
   const created: string[] = [];
 
@@ -295,8 +312,17 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
       const previousPeriods = fourPeriodsForMonth(previousMonth).filter((period) => period.end >= reportingStart);
       const monthlyTitle = `МІСЯЦЬ ${monthKey(previousMonth)}`;
       if (previousPeriods.every((period) => existing.has(period.title)) && !existing.has(monthlyTitle)) {
-        await createMonthlySheet({ spreadsheetId: input.spreadsheetId, masterSheetId, projectName: input.projectName, month: previousMonth, weeklyPeriods: previousPeriods, goalColumn: labels.column, goalFocus: labels.focus });
-        existing.add(monthlyTitle); created.push(monthlyTitle);
+        await createMonthlySheet({
+          spreadsheetId: input.spreadsheetId,
+          masterSheetId,
+          projectName: input.projectName,
+          month: previousMonth,
+          weeklyPeriods: previousPeriods,
+          goalColumn: labels.column,
+          goalFocus: labels.focus,
+        });
+        existing.add(monthlyTitle);
+        created.push(monthlyTitle);
       }
     }
   }
@@ -308,23 +334,54 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
     for (const period of periods) {
       if (period.start > today || period.end < reportingStart) continue;
       if (!existing.has(period.title)) {
-        await createWeeklySheet({ spreadsheetId: input.spreadsheetId, masterSheetId, projectName: input.projectName, period, goalColumn: labels.column, goalFocus: labels.focus });
-        existing.add(period.title); created.push(period.title);
+        await createWeeklySheet({
+          spreadsheetId: input.spreadsheetId,
+          masterSheetId,
+          projectName: input.projectName,
+          period,
+          goalColumn: labels.column,
+          goalFocus: labels.focus,
+        });
+        existing.add(period.title);
+        created.push(period.title);
       }
     }
+
     const isClosedMonth = endOfMonth(month) < today;
     const monthlyTitle = `МІСЯЦЬ ${monthKey(month)}`;
     const availablePeriods = periods.filter((period) => period.end >= reportingStart);
     if (isClosedMonth && availablePeriods.every((period) => existing.has(period.title)) && !existing.has(monthlyTitle)) {
-      await createMonthlySheet({ spreadsheetId: input.spreadsheetId, masterSheetId, projectName: input.projectName, month, weeklyPeriods: availablePeriods, goalColumn: labels.column, goalFocus: labels.focus });
-      existing.add(monthlyTitle); created.push(monthlyTitle);
+      await createMonthlySheet({
+        spreadsheetId: input.spreadsheetId,
+        masterSheetId,
+        projectName: input.projectName,
+        month,
+        weeklyPeriods: availablePeriods,
+        goalColumn: labels.column,
+        goalFocus: labels.focus,
+      });
+      existing.add(monthlyTitle);
+      created.push(monthlyTitle);
     }
     month = addMonths(month, 1);
   }
 
-  await hideMasterSheet(input.spreadsheetId, masterSheetId);
-  sheets = await getSheets(input.spreadsheetId);
-  return { created, visibleSheets: sheets.filter((sheet) => !sheet.properties.hidden).length };
+  // Hide the master without another metadata read.
+  const visibleOthers = existing.size > 1;
+  if (!master.properties.hidden && visibleOthers) {
+    await batchUpdateSpreadsheet(input.spreadsheetId, [{
+      updateSheetProperties: {
+        properties: { sheetId: masterSheetId, hidden: true },
+        fields: "hidden",
+      },
+    }]);
+    master.properties.hidden = true;
+  }
+
+  return {
+    created,
+    visibleSheets: Math.max(0, existing.size - (existing.has(MASTER_SHEET_TITLE) ? 1 : 0)),
+  };
 }
 
 export async function createProjectReport(input: { projectName: string; goalKey: string; customGoal?: string; startDate: string }) {
