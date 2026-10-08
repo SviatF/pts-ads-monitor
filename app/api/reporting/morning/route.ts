@@ -24,6 +24,10 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isGoogleOAuthReconnectRequired(error: unknown) {
+  return errorMessage(error).includes("GOOGLE_OAUTH_RECONNECT_REQUIRED");
+}
+
 function isGoogleSheetsRateLimit(error: unknown) {
   const message = errorMessage(error).toLowerCase();
   return (
@@ -88,6 +92,7 @@ export async function GET(request: Request) {
   const results: Array<Record<string, unknown>> = [];
   const unrecoveredQuotaProjects: string[] = [];
   let quotaRetries = 0;
+  let oauthReconnectRequired = false;
 
   for (let index = 0; index < configs.length; index += 1) {
     const config = configs[index];
@@ -149,7 +154,15 @@ export async function GET(request: Request) {
     } catch (error) {
       const message = errorMessage(error);
       const quotaError = isGoogleSheetsRateLimit(error);
-      results.push({ accountId: config.meta_account_id, project: config.project_name, date, error: message, quotaError });
+      const oauthError = isGoogleOAuthReconnectRequired(error);
+      results.push({ accountId: config.meta_account_id, project: config.project_name, date, error: message, quotaError, oauthError });
+
+      if (oauthError) {
+        oauthReconnectRequired = true;
+        // One broken Google credential affects every reporting project. Stop here
+        // instead of flooding Telegram with the same OAuth error per project.
+        break;
+      }
 
       if (quotaError) {
         unrecoveredQuotaProjects.push(config.project_name);
@@ -159,7 +172,12 @@ export async function GET(request: Request) {
     }
   }
 
-  if (adminChatId && unrecoveredQuotaProjects.length) {
+  if (adminChatId && oauthReconnectRequired) {
+    await notify(
+      adminChatId,
+      `🔐 <b>PTS Reporting · Google OAuth потрібно перепідключити</b>\n\nGoogle refresh token недійсний. Morning sync зупинено один раз для всіх проєктів, щоб не спамити однаковими помилками.\n\n<a href="https://pts-ads-monitor.oleg22777.workers.dev/api/google/oauth/start">Перепідключити Google →</a>\n\nПісля авторизації новий refresh token збережеться автоматично.`,
+    );
+  } else if (adminChatId && unrecoveredQuotaProjects.length) {
     await notify(
       adminChatId,
       `⚠️ <b>PTS Reporting · Google Sheets quota</b>\n\nПісля автоматичного retry не вдалося завершити: <b>${unrecoveredQuotaProjects.length}</b>\n${unrecoveredQuotaProjects.map((name) => `• ${escapeTelegramHtml(name)}`).join("\n")}\n\nСистема вже робить pacing між проєктами та автоматично чекає скидання minute quota перед повторною спробою.`,
@@ -172,11 +190,12 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({
-    ok: unrecoveredQuotaProjects.length === 0,
+    ok: unrecoveredQuotaProjects.length === 0 && !oauthReconnectRequired,
     date,
     projects: results.length,
     quotaRetries,
     unrecoveredQuotaProjects: unrecoveredQuotaProjects.length,
+    oauthReconnectRequired,
     results,
   });
 }
