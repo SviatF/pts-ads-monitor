@@ -197,7 +197,7 @@ export async function GET(request: Request) {
 
   const summary = await getReportingRepairSummary();
   const pendingRetryable = summary.rows.filter(
-    (row) => (row.status === "pending" || row.status === "failed" || row.status === "mismatch") && row.attempts < 3,
+    (row) => (row.status === "pending" || row.status === "failed") && row.attempts < 3,
   );
 
   if (jobs.length > 0 && pendingRetryable.length === 0) {
