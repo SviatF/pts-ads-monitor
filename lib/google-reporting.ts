@@ -198,10 +198,11 @@ async function createWeeklySheet(input: { spreadsheetId: string; masterSheetId: 
   await valuesBatchUpdate(spreadsheetId, data);
 }
 
-function cellFormulaForMonthly(column: string, row: number, weeklyTitles: string[]) {
-  const refs = weeklyTitles.map((title) => `${quoteSheet(title)}!${column}${row}`);
+function cellFormulaForMonthly(column: string, row: number, weeklyBlockRows: number[]) {
+  const rowOffset = row - PTS_REPORT_TEMPLATE.weekly.dataStartRow;
+  const refs = weeklyBlockRows.map((blockStartRow) => `${column}${blockStartRow + rowOffset}`);
   const sumColumns = new Set(["B", "C", "E", "G", "H", "J", "L", "M", "O"]);
-  if (sumColumns.has(column)) return `=SUM(${refs.join(";")})`;
+  if (sumColumns.has(column)) return refs.length ? `=SUM(${refs.join(";")})` : "";
   switch (column) {
     case "D": return `=IFERROR(1-B${row}/C${row};0)`;
     case "F": return `=IFERROR(E${row}/B${row};0)`;
@@ -233,19 +234,27 @@ async function writeMonthlySheet(input: { spreadsheetId: string; projectName: st
   const availableWeeklyTitles = new Set(weeklyTitles);
   const monthPeriods = fourPeriodsForMonth(month);
   const columns = "ABCDEFGHIJKLMNOPQR".split("");
+  const monthlyBlocks = PTS_REPORT_TEMPLATE.daily.blocks.slice(0, 4);
+  const activeBlockRows = monthlyBlocks
+    .map((block, index) => availableWeeklyTitles.has(monthPeriods[index]?.title || "") ? block.dataStartRow : null)
+    .filter((row): row is number => row !== null);
 
-  if (weeklyTitles.length) {
+  // The monthly top block is intentionally calculated from the four lower
+  // weekly-summary blocks on the SAME monthly sheet. The lower blocks mirror
+  // the four weekly sheets. This makes the formula chain explicit:
+  // weekly sheet -> monthly week block -> monthly total block.
+  if (activeBlockRows.length) {
     for (let row = PTS_REPORT_TEMPLATE.weekly.dataStartRow; row <= PTS_REPORT_TEMPLATE.weekly.dataEndRow; row += 1) {
       for (const column of columns) {
         data.push({
           range: `${sheet}!${column}${row}`,
-          values: [[column === "A" ? `=${quoteSheet(weeklyTitles[0])}!A${row}` : cellFormulaForMonthly(column, row, weeklyTitles)]],
+          values: [[column === "A"
+            ? `=A${activeBlockRows[0] + (row - PTS_REPORT_TEMPLATE.weekly.dataStartRow)}`
+            : cellFormulaForMonthly(column, row, activeBlockRows)]],
         });
       }
     }
   }
-
-  const monthlyBlocks = PTS_REPORT_TEMPLATE.daily.blocks.slice(0, 4);
   monthlyBlocks.forEach((block, index) => {
     const period = monthPeriods[index];
     if (!period || !availableWeeklyTitles.has(period.title)) {
