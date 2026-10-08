@@ -225,16 +225,6 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
   const campaignDetail = await syncCampaignPerformanceSheets(input.spreadsheetId, campaignRows, currency);
 
   return {
-      title: expected.title,
-      expectedResults: expected.results,
-      actualResults,
-      expectedSpend: expected.spend,
-      actualSpend: Number(actualSpend.toFixed(2)),
-      matches: actualResults === expected.results && spendDiff <= 0.02,
-    };
-  });
-
-  return {
     insightRows: insights.length,
     mappedCampaigns: [...mappedCampaigns],
     unmappedCampaigns: [...unmapped],
