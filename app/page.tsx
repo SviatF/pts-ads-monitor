@@ -224,6 +224,11 @@ export default async function Dashboard() {
               </div>
             )}
           </section>
+          <footer className="dashboardFooter">
+            <Link href="/about">About</Link>
+            <Link href="/privacy">Privacy Policy</Link>
+            <Link href="/terms">Terms of Service</Link>
+          </footer>
         </div>
       </section>
     </main>
