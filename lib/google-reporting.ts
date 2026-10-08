@@ -145,6 +145,56 @@ async function duplicateFromMaster(spreadsheetId: string, masterSheetId: number,
   return id;
 }
 
+// Arrange generated tabs by reporting month, newest first. Within each month:
+// monthly summary, weekly periods newest-first, then campaign breakdown.
+// Keep unrelated tabs after reports and the hidden master at the very end.
+function reportTabSortKey(title: string, knownMonths: Map<string, number>) {
+  const monthly = title.match(/^МІСЯЦЬ\\s+(\\d{2})\\.(\\d{4})$/i);
+  if (monthly) return { month: Number(monthly[2]) * 12 + Number(monthly[1]), type: 0, week: 0 };
+  const campaign = title.match(/^КАМПАНІЇ\\s+(\\d{2})\\.(\\d{4})$/i);
+  if (campaign) return { month: Number(campaign[2]) * 12 + Number(campaign[1]), type: 2, week: 0 };
+  const weekly = title.match(/^(\\d{2})\\.(\\d{2})[–-](\\d{2})\\.(\\d{2})$/);
+  if (weekly && weekly[2] === weekly[4]) {
+    const monthNumber = Number(weekly[2]);
+    const known = knownMonths.get(weekly[2]);
+    if (known !== undefined) return { month: known * 12 + monthNumber, type: 1, week: Number(weekly[1]) };
+  }
+  return null;
+}
+
+async function arrangeReportTabs(spreadsheetId: string, sheets: SheetMeta[]) {
+  const knownMonths = new Map<string, number>();
+  for (const sheet of sheets) {
+    const match = sheet.properties.title.match(/^(?:МІСЯЦЬ|КАМПАНІЇ)\\s+(\\d{2})\\.(\\d{4})$/i);
+    if (!match) continue;
+    const old = knownMonths.get(match[1]);
+    if (old === undefined || Number(match[2]) > old) knownMonths.set(match[1], Number(match[2]));
+  }
+  // Do not guess a year for an orphaned weekly sheet.
+  const current = [...sheets].sort((a, b) => (a.properties.index ?? 0) - (b.properties.index ?? 0));
+  const desired = [...current].sort((a, b) => {
+    const x = reportTabSortKey(a.properties.title, knownMonths);
+    const y = reportTabSortKey(b.properties.title, knownMonths);
+    if (x && y) return y.month - x.month || x.type - y.type || y.week - x.week;
+    if (x) return -1;
+    if (y) return 1;
+    if (a.properties.title === MASTER_SHEET_TITLE) return 1;
+    if (b.properties.title === MASTER_SHEET_TITLE) return -1;
+    return 0;
+  });
+  const order = current.map((sheet) => sheet.properties.sheetId);
+  const updates: unknown[] = [];
+  for (let i = 0; i < desired.length; i += 1) {
+    const id = desired[i].properties.sheetId;
+    const previous = order.indexOf(id);
+    if (previous === i) continue;
+    updates.push({ updateSheetProperties: { properties: { sheetId: id, index: i }, fields: "index" } });
+    order.splice(previous, 1);
+    order.splice(i, 0, id);
+  }
+  if (updates.length) await batchUpdateSpreadsheet(spreadsheetId, updates);
+}
+
 async function expandWeeklySheet(spreadsheetId: string, sheetId: number, days: number) {
   const extra = Math.max(0, days - 7);
   if (!extra) return;
@@ -440,6 +490,10 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
     }]);
     master.properties.hidden = true;
   }
+
+  // Order existing and newly created tabs on every lifecycle pass.
+  // A single fresh metadata read is needed only when new tabs were created.
+  await arrangeReportTabs(input.spreadsheetId, created.length ? await getSheets(input.spreadsheetId) : sheets);
 
   return {
     created,
