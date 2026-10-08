@@ -3,10 +3,10 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getStoredAccount } from "@/lib/store";
 import { createProjectReport, REPORTING_GOALS } from "@/lib/google-reporting-user";
-import { ensureProjectReportLifecycle } from "@/lib/google-reporting";
+
 import { getReportingConfig, setReportingCurrency, upsertReportingConfig } from "@/lib/reporting-store";
 import { getPerformanceMonitoringConfig, upsertPerformanceMonitoringConfig } from "@/lib/performance-config-store";
-import { syncMetaReporting } from "@/lib/meta-reporting-sync";
+import { runReportingSync } from "@/lib/reporting-runner";
 import { applyReportCurrencyFormats, formatCurrencyAmount, normalizeReportingCurrency, REPORTING_CURRENCIES } from "@/lib/report-currency";
 
 export const dynamic = "force-dynamic";
@@ -176,26 +176,13 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
       if (!config) throw new Error("Спочатку потрібно створити Google звіт для цього кабінету.");
       if (!since || !until) throw new Error("Вкажіть період синхронізації.");
       if (since > until) throw new Error("Дата початку не може бути пізніше дати завершення.");
-      const { result } = await withManualSheetsRetry(async () => {
-        const lifecycle = await ensureProjectReportLifecycle({
-          spreadsheetId: config.report_file_id,
-          projectName: config.project_name,
-          goalKey: config.goal_key,
-          goalLabel: config.goal_label,
-          reportingStartDate: since,
-        });
-        if (lifecycle.created.length) {
-          await applyReportCurrencyFormats(config.report_file_id, config.currency || "USD");
-        }
-        const result = await syncMetaReporting({
-          accountId: currentAccountId,
-          spreadsheetId: config.report_file_id,
+      const { result } = await withManualSheetsRetry(() =>
+        runReportingSync(config, {
           since,
           until,
-          currency: config.currency || "USD",
-        });
-        return { lifecycle, result };
-      });
+          lifecycleStartDate: since,
+        }),
+      );
       const unmappedPreview = result.unmappedCampaigns.slice(0, 5).join("; ");
       successMessage = `Meta sync ${since} → ${until}: ${result.insightRows} campaign-day rows; ${result.mappedCampaigns.length} mapped campaigns; results=${result.mappedLeads}; spend=${formatCurrencyAmount(result.mappedSpend, config.currency || "USD")}; ${result.unmappedCampaigns.length} unmapped${unmappedPreview ? ` — ${unmappedPreview}` : ""}.`;
       revalidatePath(`/reporting/${encodeURIComponent(currentAccountId)}`);
@@ -222,11 +209,11 @@ export default async function ReportingSetupPage({ params, searchParams }: { par
         {query.message ? <div className="empty good">{query.message}</div> : null}
         {existing ? (
           <form action={syncMeta} className="setupForm">
-            <div className="eyebrow">Meta Ads → Daily reporting</div><h2>Синхронізувати дані кабінету</h2>
-            <p className="subtitle">Mapping: Direct/Messenger → Direct / Messenger; LeadForm/Leads-Form/Lead Form/legacy Leads → Lead Form; Quiz → Quiz; Site/Website/Web → Site. Невідомі назви не записуються навмання.</p>
+            <div className="eyebrow">Meta Ads → Reporting</div><h2>Синхронізувати звіт</h2>
+            <p className="subtitle">Працює тією ж логікою, що й автоматичний sync о 09:00, тільки одразу за вибраний період. Канали: Direct/Messenger → Direct / Messenger; LeadForm/Leads-Form/Lead Form/legacy Leads → Lead Form; Quiz → Quiz; Site/Website/Web → Site. Невідомі campaign names не записуються навмання.</p>
             <label><span>Період від</span><input type="date" name="since" defaultValue={previousMonth.since} required /></label>
             <label><span>Період до</span><input type="date" name="until" defaultValue={previousMonth.until} required /></label>
-            <div className="setupActions"><button className="runButton primaryAction" type="submit">Синхронізувати Meta → звіт</button></div>
+            <div className="setupActions"><button className="runButton primaryAction" type="submit">Синхронізувати звіт</button></div>
           </form>
         ) : null}
         <form action={createReport} className="setupForm">
