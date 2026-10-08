@@ -45,7 +45,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export async function listPendingReportingRepairJobs(limit = 2) {
   return await request<ReportingRepairJob[]>(
-    `reporting_repair_jobs?select=*&status=in.(pending,failed,mismatch)&order=attempts.asc,updated_at.asc&limit=${Math.max(1, Math.min(limit, 5))}`,
+    `reporting_repair_jobs?select=*&status=in.(pending,failed,mismatch)&attempts=lt.3&order=attempts.asc,updated_at.asc&limit=${Math.max(1, Math.min(limit, 5))}`,
   );
 }
 
