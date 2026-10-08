@@ -177,7 +177,7 @@ export async function handleReportingTelegramCommand(chatId: string, text: strin
     }
     const config = await resolveConfiguredAccount(bindArg);
     if (!config) {
-      await sendTelegramToChat(chatId, "❌ Не вдалося підключити звітність. Зверніться до менеджера PTS.");
+      await sendTelegramToChat(chatId, `❌ <b>Reporting config не знайдено</b>\n\nКабінет: <code>${escapeTelegramHtml(bindArg)}</code>\n\nСпочатку створіть/активуйте звітність для цього Meta account у PTS Ads Monitor, після чого повторіть команду.`);
       return true;
     }
     await upsertReportingTelegramSubscription({ telegram_chat_id: chatId, meta_account_id: config.meta_account_id, account_name: config.project_name });
