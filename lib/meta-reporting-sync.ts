@@ -3,7 +3,7 @@ import { dailyBlocksForDays } from "@/lib/report-template";
 import { applyReportFormulas } from "@/lib/report-formulas";
 import { dayIndexInPeriod, parseIsoDate, periodForDate, periodLength } from "@/lib/report-periods";
 import { syncCampaignPerformanceSheets, type CampaignPerformanceRow } from "@/lib/campaign-report-sheet";
-import { applyReportCurrencyFormats, normalizeReportingCurrency } from "@/lib/report-currency";
+import { normalizeReportingCurrency } from "@/lib/report-currency";
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v26.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -218,7 +218,6 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
   });
 
   const campaignDetail = await syncCampaignPerformanceSheets(input.spreadsheetId, campaignRows, currency);
-  await applyReportCurrencyFormats(input.spreadsheetId, currency);
 
   return {
     insightRows: insights.length,
