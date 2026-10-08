@@ -131,6 +131,16 @@ async function duplicateFromMaster(spreadsheetId: string, masterSheetId: number,
   const response = await googleJson<{ replies?: Array<{ duplicateSheet?: { properties?: { sheetId?: number } } }> }>(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ duplicateSheet: { sourceSheetId: masterSheetId, newSheetName: title } }] }) });
   const id = response.replies?.[0]?.duplicateSheet?.properties?.sheetId;
   if (typeof id !== "number") throw new Error(`Could not create worksheet ${title}`);
+
+  // _PTS_MASTER is intentionally hidden. Google copies that hidden flag when
+  // duplicating the sheet, so explicitly make every generated report tab visible.
+  await batchUpdateSpreadsheet(spreadsheetId, [{
+    updateSheetProperties: {
+      properties: { sheetId: id, hidden: false },
+      fields: "hidden",
+    },
+  }]);
+
   return id;
 }
 
@@ -259,6 +269,24 @@ export async function ensureProjectReportLifecycle(input: { spreadsheetId: strin
   let sheets = await getSheets(input.spreadsheetId);
   const existing = new Set(sheets.map((sheet) => sheet.properties.title));
   const created: string[] = [];
+
+  // Repair sheets created by older lifecycle versions that inherited hidden=true
+  // from the hidden _PTS_MASTER template.
+  const hiddenGeneratedSheets = sheets.filter(
+    (sheet) => sheet.properties.title !== MASTER_SHEET_TITLE && sheet.properties.hidden,
+  );
+  if (hiddenGeneratedSheets.length) {
+    await batchUpdateSpreadsheet(
+      input.spreadsheetId,
+      hiddenGeneratedSheets.map((sheet) => ({
+        updateSheetProperties: {
+          properties: { sheetId: sheet.properties.sheetId, hidden: false },
+          fields: "hidden",
+        },
+      })),
+    );
+    for (const sheet of hiddenGeneratedSheets) sheet.properties.hidden = false;
+  }
 
   if (today.getUTCDate() === 1) {
     const previousMonth = addMonths(startOfMonth(today), -1);
