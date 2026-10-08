@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeGoogleCode } from "@/lib/google-oauth";
+import { saveGoogleRefreshToken } from "@/lib/google-oauth-store";
 
 export const dynamic = "force-dynamic";
 
@@ -27,10 +28,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const safe = tokens.refresh_token.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    await saveGoogleRefreshToken(tokens.refresh_token);
     return page(
       "Google Drive connected",
-      `<p style="color:#a7f3b0">Authorization succeeded.</p><p>Copy the value below and add it to Cloudflare as a <strong>Secret</strong> named <code>GOOGLE_OAUTH_REFRESH_TOKEN</code>.</p><textarea readonly style="width:100%;min-height:130px;background:#080808;color:#fff;border:1px solid #333;border-radius:12px;padding:14px;box-sizing:border-box">${safe}</textarea><p style="color:#999">Do not send this token in chat. After saving it in Cloudflare, redeploy the Worker.</p>`,
+      `<p style="color:#a7f3b0">Authorization succeeded.</p><p>✅ Refresh token збережено автоматично. Нічого копіювати в Cloudflare не потрібно.</p><p style="color:#999">PTS Reporting уже може використовувати цей Google account. Якщо OAuth consent screen у Google Cloud ще має статус <strong>Testing</strong>, переведіть його в <strong>In production</strong>, інакше Google може знову завершити дію refresh token приблизно через 7 днів.</p><p><a style="color:#8ec5ff" href="/">Повернутися в PTS Ads Monitor</a></p>`,
     );
   } catch (e) {
     return page("Google OAuth exchange failed", `<pre style="white-space:pre-wrap;color:#ffaaaa">${e instanceof Error ? e.message : String(e)}</pre>`, false);
