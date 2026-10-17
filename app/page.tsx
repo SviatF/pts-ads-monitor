@@ -61,6 +61,13 @@ export default async function Dashboard() {
   const monitoringByAccount = new Map(monitoringConfigs.map((config) => [config.meta_account_id, config]));
   const needsSetup = accounts.filter((account) => !endedByAccount.has(account.meta_account_id) && !reportingByAccount.has(account.meta_account_id) && !monitoringByAccount.has(account.meta_account_id));
   const monitoringEnabled = monitoringConfigs.filter((item) => item.enabled).length;
+  // A failed token refresh is not always a revoked token. Only invalid_grant
+  // is actionable as reconnect; transient Google outages must not claim that
+  // reauthorization is required.
+  const oauthError = googleOAuthStatus?.last_error || "";
+  const oauthReconnectRequired = /"error"\\s*:\\s*"invalid_grant"|GOOGLE_OAUTH_RECONNECT_REQUIRED/i.test(oauthError);
+  const oauthErrorAt = googleOAuthStatus?.updated_at || null;
+
 
   return (
     <main className="adminShell">
@@ -121,10 +128,13 @@ export default async function Dashboard() {
             <section className="panel" style={{ marginBottom: 12, borderColor: "rgba(255,91,120,.4)" }}>
               <div className="panelHead">
                 <div>
-                  <strong className="bad">Google OAuth потребує уваги</strong>
-                  <div className="eyebrow panelSub">Reporting не зможе оновлювати Google Sheets, доки Google account не буде перепідключено.</div>
+                  <strong className="bad">{oauthReconnectRequired ? "Google OAuth потребує перепідключення" : "Помилка оновлення Google OAuth"}</strong>
+                  <div className="eyebrow panelSub">{oauthReconnectRequired
+                    ? "Google відхилив refresh token (invalid_grant). Потрібне повторне підключення акаунта."
+                    : "Останнє оновлення токена завершилося помилкою. Це ще не означає, що доступ відкликано; перевірте причину перед перепідключенням."}</div>
+                  <div className="eyebrow panelSub">{oauthErrorAt ? `Час останнього запису: ${new Date(oauthErrorAt).toLocaleString("uk-UA", { timeZone: "Europe/Kyiv" })} · ` : ""}Код: {oauthReconnectRequired ? "invalid_grant" : "refresh_error"}</div>
                 </div>
-                <a className="runButton dangerAction" href="/api/google/oauth/start">Перепідключити Google</a>
+                {oauthReconnectRequired ? <a className="runButton dangerAction" href="/api/google/oauth/start">Перепідключити Google</a> : null}
               </div>
             </section>
           ) : null}
