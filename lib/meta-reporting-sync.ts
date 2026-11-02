@@ -140,6 +140,35 @@ async function metaGraphAll<T>(path: string, params: Record<string, string>) {
   return rows;
 }
 
+// Request smaller, non-overlapping date windows to reduce Graph Insights
+// processing pressure. Never write a partial result if any window fails.
+async function metaInsightsByWeek(objectId: string, since: string, until: string) {
+  const start = parseIsoDate(since);
+  const end = parseIsoDate(until);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) {
+    throw new Error("Invalid Meta Insights date interval.");
+  }
+  const rows: MetaInsight[] = [];
+  for (let cursor = new Date(start); cursor <= end;) {
+    const windowEnd = new Date(Math.min(end.getTime(), cursor.getTime() + 6 * 86_400_000));
+    const from = cursor.toISOString().slice(0, 10);
+    const to = windowEnd.toISOString().slice(0, 10);
+    try {
+      rows.push(...await metaGraphAll<MetaInsight>(`${objectId}/insights`, {
+        level: "campaign",
+        fields: "campaign_id,campaign_name,spend,actions,date_start,date_stop",
+        time_increment: "1",
+        time_range: JSON.stringify({ since: from, until: to }),
+        limit: "500",
+      }));
+    } catch (error) {
+      throw new Error(`Meta Insights ${from}–${to}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    cursor = new Date(windowEnd.getTime() + 86_400_000);
+  }
+  return rows;
+}
+
 async function googleValuesBatchUpdate(spreadsheetId: string, data: Array<{ range: string; values: Array<Array<string | number>> }>) {
   if (!data.length) return;
   const token = await getGoogleUserAccessToken();
@@ -173,13 +202,7 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
   const currency = normalizeReportingCurrency(input.currency || "USD");
 
   const objectId = input.accountId.startsWith("act_") ? input.accountId : `act_${input.accountId}`;
-  const insights = await metaGraphAll<MetaInsight>(`${objectId}/insights`, {
-    level: "campaign",
-    fields: "campaign_id,campaign_name,spend,actions,date_start,date_stop",
-    time_increment: "1",
-    time_range: JSON.stringify({ since: input.since, until: input.until }),
-    limit: "500",
-  });
+  const insights = await metaInsightsByWeek(objectId, input.since, input.until);
 
   const aggregate = new Map<string, { leads: number; spend: number }>();
   const unmapped = new Set<string>();
@@ -252,13 +275,7 @@ export async function syncMetaReporting(input: { accountId: string; spreadsheetI
   // rewritten with just one day, which made month/week totals collapse to the
   // last synced date.
   const campaignDetailSince = monthStartIso(input.since);
-  const campaignInsights = await metaGraphAll<MetaInsight>(`${objectId}/insights`, {
-    level: "campaign",
-    fields: "campaign_id,campaign_name,spend,actions,date_start,date_stop",
-    time_increment: "1",
-    time_range: JSON.stringify({ since: campaignDetailSince, until: input.until }),
-    limit: "500",
-  });
+  const campaignInsights = await metaInsightsByWeek(objectId, campaignDetailSince, input.until);
   const campaignRows: CampaignPerformanceRow[] = campaignInsights.flatMap((insight) => {
     const name = insight.campaign_name || "(unnamed campaign)";
     const channel = mapCampaignToChannel(name);
