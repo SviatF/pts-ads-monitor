@@ -91,7 +91,7 @@ function metaErrorDescription(status: number, error?: MetaPage<unknown>["error"]
 }
 
 async function metaGraphAll<T>(path: string, params: Record<string, string>) {
-  const url = new URL(`${GRAPH_BASE}/${path.replace(/^\\//, "")}`);
+  const url = new URL(`${GRAPH_BASE}/${path.replace(/^\//, "")}`);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   url.searchParams.set("access_token", metaToken());
   const rows: T[] = [];
