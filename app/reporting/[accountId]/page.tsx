@@ -33,20 +33,17 @@ function isGoogleSheetsRateLimit(error: unknown) {
   );
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function withManualSheetsRetry<T>(operation: () => Promise<T>) {
+  // Do not wait 65 seconds and rerun an entire reporting sync inside a
+  // Cloudflare Server Action: request deadlines can turn this into an opaque
+  // "An unknown error occurred" response.
   try {
     return await operation();
   } catch (error) {
-    if (!isGoogleSheetsRateLimit(error)) throw error;
-    // Google Sheets per-user read quota resets on the minute window.
-    // Wait once and rerun the complete operation so a manual full-month repair
-    // does not fail halfway with a raw 429.
-    await sleep(65_000);
-    return await operation();
+    if (isGoogleSheetsRateLimit(error)) {
+      throw new Error("Google Sheets тимчасово перевищив ліміт запитів (429). Зачекайте приблизно хвилину й повторіть синхронізацію. Дані менеджерів не змінюються.");
+    }
+    throw error;
   }
 }
 
