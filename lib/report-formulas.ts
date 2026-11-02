@@ -53,6 +53,8 @@ function derivedFormulas(row: number) {
     D: `=IFERROR(1-B${row}/C${row};0)`,
     // Cost per manager-confirmed/handed-off lead.
     F: `=IFERROR(E${row}/B${row};0)`,
+    // Meta CPL: spend per platform result, independent from manager-entered leads.
+    S: `=IFERROR(E${row}/C${row};0)`,
     I: `=IFERROR(H${row}/B${row};0)`,
     K: `=IFERROR(J${row}/G${row};0)`,
     N: `=IFERROR(L${row}/J${row};0)`,
@@ -123,6 +125,7 @@ function pushSchemaHeaders(data: ValueUpdate[], sheetTitle: string, days: number
     data.push({ range: `${sheet}!B${row}`, values: [["Загальна\nкількість лідів"]] });
     data.push({ range: `${sheet}!C${row}`, values: [["Результат"]] });
     data.push({ range: `${sheet}!D${row}`, values: [["% різниці між\nрезультатом та\nлідами"]] });
+    data.push({ range: `${sheet}!S${row}`, values: [["Ціна за результат\nMeta Ads"]] });
   }
 }
 
