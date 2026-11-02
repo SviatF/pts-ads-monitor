@@ -79,7 +79,7 @@ export async function applyReportCurrencyFormats(spreadsheetId: string, currency
     const campaignSheet = /^КАМПАНІЇ\s/i.test(title);
     const columns = campaignSheet
       ? [[3, 4], [5, 6]] // D = spend, F = cost/result
-      : [[4, 6], [16, 18]]; // E/F = spend/CPL, Q/R = cost KPIs
+      : [[4, 6], [16, 19]]; // E/F spend/manager CPL, Q/R KPI costs, S Meta CPL
 
     for (const [startColumnIndex, endColumnIndex] of columns) {
       requests.push({
