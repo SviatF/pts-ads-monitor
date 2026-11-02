@@ -117,6 +117,34 @@ function aggregate(rows: CampaignPerformanceRow[], period: (row: CampaignPerform
   });
 }
 
+// Stable service key convention in Meta campaign names:
+// [SVC:laser] / [SVC:massage] / SERVICE=laser / SVC=laser.
+// Campaigns without an explicit key are kept separate.
+function serviceKey(name: string) {
+  const match = name.match(/\[(?:SVC|SERVICE)\s*[:=]\s*([a-z0-9][a-z0-9_-]{0,39})\]|\b(?:SVC|SERVICE)\s*[:=]\s*([a-z0-9][a-z0-9_-]{0,39})/i);
+  return (match?.[1] || match?.[2] || "").toLowerCase();
+}
+
+function serviceAggregate(rows: CampaignPerformanceRow[], month: string): SectionRow[] {
+  const grouped = new Map<string, SectionRow>();
+  for (const row of rows) {
+    const key = serviceKey(row.campaignName);
+    const label = key ? "SERVICE: " + key : "БЕЗ КЛЮЧА: " + row.campaignName;
+    const groupId = key ? "svc:" + key + "|" + row.channel : "campaign:" + row.campaignId + "|" + row.channel;
+    const current = grouped.get(groupId) || {
+      period: month,
+      campaignName: label,
+      channel: row.channel,
+      spend: 0,
+      results: 0,
+    };
+    current.spend += row.spend;
+    current.results += row.results;
+    grouped.set(groupId, current);
+  }
+  return [...grouped.values()].sort((a, b) => b.spend - a.spend);
+}
+
 function tableRows(rows: SectionRow[]) {
   return rows.map((row) => [
     row.period,
@@ -130,12 +158,18 @@ function tableRows(rows: SectionRow[]) {
 
 function buildValues(month: string, rows: CampaignPerformanceRow[]) {
   const monthAgg = aggregate(rows, () => month);
+  const serviceAgg = serviceAggregate(rows, month);
   const weekAgg = aggregate(rows, (row) => periodForDate(parseIsoDate(row.date)).title);
   const dayAgg = aggregate(rows, (row) => formatUaDate(row.date));
 
   const values: Array<Array<string | number>> = [];
   values.push([`META CAMPAIGNS PERFORMANCE · ${month}`]);
-  values.push(["Автоматичний технічний зріз усіх кампаній. Менеджери цей аркуш не заповнюють."]);
+  values.push(["Автоматичний зріз. Для групування кампаній за однією послугою додайте [SVC:laser] до назви кампанії. Без ключа кампанії не обʼєднуються."]);
+  values.push([]);
+
+  values.push(["ПО ПОСЛУГАХ"]);
+  values.push(["Період", "Послуга / ключ", "Канал / посадка", "Витрати", "Результат", "Ціна за результат"]);
+  values.push(...tableRows(serviceAgg));
   values.push([]);
 
   values.push(["МІСЯЦЬ"]);
@@ -184,7 +218,7 @@ async function formatSheet(spreadsheetId: string, sheetId: number, values: Array
   values.forEach((row, index) => {
     const first = String(row[0] ?? "");
     if (first === "Період" || first === "Дата") headerRows.push(index);
-    if (first === "МІСЯЦЬ" || first === "ПО ТИЖНЯХ" || first === "ПО ДНЯХ") sectionRows.push(index);
+    if (first === "ПО ПОСЛУГАХ" || first === "МІСЯЦЬ" || first === "ПО ТИЖНЯХ" || first === "ПО ДНЯХ") sectionRows.push(index);
   });
 
   const requests: unknown[] = [
