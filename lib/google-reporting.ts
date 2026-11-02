@@ -259,6 +259,7 @@ function commonSheetValues(sheetTitle: string, projectName: string, start: Date,
     data.push({ range: `${sheet}!D${row}`, values: [["% різниці між\nрезультатом та\nлідами"]] });
     data.push({ range: `${sheet}!O${row}`, values: [[goalColumn]] });
     data.push({ range: `${sheet}!P${row}`, values: [[`Конверсія\nЗ → ${goalFocus}`]] });
+    data.push({ range: `${sheet}!S${row}`, values: [["Ціна за результат\nMeta Ads"]] });
   }
   return data;
 }
@@ -292,6 +293,7 @@ function cellFormulaForMonthly(column: string, row: number, weeklyBlockRows: num
     case "P": return `=IFERROR(O${row}/M${row};0)`;
     case "Q": return `=IFERROR(E${row}/J${row};0)`;
     case "R": return `=IFERROR(E${row}/M${row};0)`;
+    case "S": return `=IFERROR(E${row}/C${row};0)`;
     default: return refs[0] ? `=${refs[0]}` : "";
   }
 }
@@ -313,7 +315,7 @@ async function writeMonthlySheet(input: { spreadsheetId: string; projectName: st
   const weeklyTitles = weeklyPeriods.map((period) => period.title);
   const availableWeeklyTitles = new Set(weeklyTitles);
   const monthPeriods = fourPeriodsForMonth(month);
-  const columns = "ABCDEFGHIJKLMNOPQR".split("");
+  const columns = "ABCDEFGHIJKLMNOPQRS".split("");
   const monthlyBlocks = PTS_REPORT_TEMPLATE.daily.blocks.slice(0, 4);
   const activeBlockRows: number[] = monthlyBlocks.flatMap((block, index) =>
     availableWeeklyTitles.has(monthPeriods[index]?.title || "") ? [Number(block.dataStartRow)] : [],
