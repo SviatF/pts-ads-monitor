@@ -10,7 +10,7 @@ const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 type MetaAction = { action_type?: string; value?: string };
 type MetaInsight = { campaign_id?: string; campaign_name?: string; spend?: string; actions?: MetaAction[]; date_start: string; date_stop?: string };
-type MetaPage<T> = { data?: T[]; paging?: { next?: string }; error?: { message?: string } };
+type MetaPage<T> = { data?: T[]; paging?: { next?: string }; error?: { message?: string; code?: number; error_subcode?: number; is_transient?: boolean; fbtrace_id?: string } };
 type Channel = "direct" | "leadform" | "quiz" | "site";
 
 const CHANNEL_ROW_OFFSET: Record<Channel, number> = { direct: 1, leadform: 2, quiz: 3, site: 4 };
@@ -73,18 +73,69 @@ function genericResultCount(actions: MetaAction[] | undefined) {
   return 0;
 }
 
+const META_RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const META_TRANSIENT_CODES = new Set([1, 2, 4, 17, 32, 613]);
+
+function metaRetryable(status: number, error?: MetaPage<unknown>["error"]) {
+  return META_RETRY_STATUSES.has(status) ||
+    error?.is_transient === true ||
+    (typeof error?.code === "number" && META_TRANSIENT_CODES.has(error.code));
+}
+
+function metaErrorDescription(status: number, error?: MetaPage<unknown>["error"]) {
+  const message = error?.message || `HTTP ${status}`;
+  const code = typeof error?.code === "number" ? ` · code ${error.code}` : "";
+  const subcode = typeof error?.error_subcode === "number" ? ` · subcode ${error.error_subcode}` : "";
+  const trace = error?.fbtrace_id ? ` · trace ${error.fbtrace_id}` : "";
+  return `Meta Graph API (${status}${code}${subcode}): ${message}${trace}`;
+}
+
 async function metaGraphAll<T>(path: string, params: Record<string, string>) {
-  const url = new URL(`${GRAPH_BASE}/${path.replace(/^\//, "")}`);
+  const url = new URL(`${GRAPH_BASE}/${path.replace(/^\\//, "")}`);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   url.searchParams.set("access_token", metaToken());
   const rows: T[] = [];
   let next: string | null = url.toString();
+  let pages = 0;
   while (next) {
-    const response: Response = await fetch(next, { cache: "no-store" });
-    const body = (await response.json()) as MetaPage<T>;
-    if (!response.ok || body.error) throw new Error(body.error?.message || `Meta API request failed (${response.status})`);
-    rows.push(...(body.data || []));
-    next = body.paging?.next || null;
+    let page: MetaPage<T> | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let response: Response;
+      try {
+        response = await fetch(next, { cache: "no-store" });
+      } catch (error) {
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 800));
+          continue;
+        }
+        throw new Error(`Meta Graph API network failure: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const raw = await response.text();
+      let result: MetaPage<T>;
+      try {
+        result = JSON.parse(raw) as MetaPage<T>;
+      } catch {
+        // Avoid leaking full response content or OAuth credentials into logs.
+        if (metaRetryable(response.status) && attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 800));
+          continue;
+        }
+        throw new Error(`Meta Graph API (${response.status}): unexpected non-JSON response`);
+      }
+      if (!response.ok || result.error) {
+        if (metaRetryable(response.status, result.error) && attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 800));
+          continue;
+        }
+        throw new Error(metaErrorDescription(response.status, result.error));
+      }
+      page = result;
+      break;
+    }
+    if (!page) throw new Error("Meta Graph API: retries exhausted");
+    rows.push(...(page.data || []));
+    next = page.paging?.next || null;
+    if (++pages > 1000) throw new Error("Meta Graph API: pagination limit exceeded");
   }
   return rows;
 }
