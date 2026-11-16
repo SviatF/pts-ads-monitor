@@ -10,14 +10,7 @@
     "start": "next start",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
-    "invoice:run": "node scripts/invoice-runner-supervisor.mjs",
-    "invoice:run-raw": "node scripts/invoice-runner.mjs",
-    "invoice:probe": "node --env-file=.env.invoice-agent scripts/invoice-network-probe.mjs",
-    "invoice:daemon": "node scripts/invoice-daemon.mjs",
-    "invoice:capture-session": "node scripts/meta-session-capture.mjs",
-    "invoice:local-login": "node scripts/meta-local-login.mjs",
-    "invoice:install-mac": "node scripts/install-mac-agent.mjs"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
     "next": "15.5.26",
@@ -29,7 +22,6 @@
     "@types/node": "22.15.30",
     "@types/react": "19.1.6",
     "@types/react-dom": "19.1.5",
-    "playwright": "latest",
     "typescript": "5.8.3",
     "wrangler": "latest"
   }
