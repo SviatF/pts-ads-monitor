@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auditPerformanceAccount } from "@/lib/performance-account-audit";
-import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/telegram-messages";
 import { telegramWebhookSecret } from "@/lib/telegram-webhook-secret";
 
 export const dynamic = "force-dynamic";
