@@ -1,5 +1,5 @@
 import { listPerformanceMonitoringConfigs } from "@/lib/performance-config-store";
-import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/telegram-messages";
 
 type AlertRow = {
   id: number;
