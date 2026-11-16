@@ -106,12 +106,14 @@ function performancePushWindowOpen(date = new Date()) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    weekday: "short",
   }).formatToParts(date);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   const hour = Number(values.hour || 0);
-  // Quiet hours: 21:00–08:59 Kyiv. Performance analysis still runs,
-  // alerts/tasks are still persisted, but the group is not disturbed at night.
-  return hour >= 9 && hour < 21;
+  const day = String(values.weekday || "");
+  // Monitoring and task persistence stay active, but automatic alerts are silent
+  // 21:00–08:59 Kyiv and all weekend. Only the gentle weekend digest is sent.
+  return day !== "Sat" && day !== "Sun" && hour >= 9 && hour < 21;
 }
 function quoteSheet(title: string) { return `'${title.replace(/'/g, "''")}'`; }
 function actionMap(actions?: MetaAction[]) { return new Map((actions || []).map((item) => [item.action_type || "", Number(item.value || 0)])); }
