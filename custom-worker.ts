@@ -73,9 +73,9 @@ export default {
       tasks.push(callInternal("/api/reporting/morning", env, ctx));
     }
 
-    // Daily Tasks: every day around 08:10 Europe/Kyiv.
-    // On weekends the endpoint switches to a softer weekend message automatically.
-    if (hour === 8 && minute >= 10 && minute < 20) {
+    // Weekdays: 08:10 Kyiv. Weekends: just one gentle digest at 10:00 Kyiv.
+    if ((!weekend && hour === 8 && minute >= 10 && minute < 20) ||
+        (weekend && hour === 10 && minute < 10)) {
       tasks.push(callInternal("/api/performance/tasks", env, ctx));
     }
 
