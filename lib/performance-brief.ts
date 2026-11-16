@@ -1,5 +1,5 @@
 import { listPerformanceMonitoringConfigs } from "@/lib/performance-config-store";
-import { escapeTelegramHtml } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml } from "@/lib/telegram-messages";
 import { sendPerformanceMessage } from "@/lib/performance-telegram";
 import { sendSalesReportingCompleteness } from "@/lib/sales-reporting-completeness";
 
