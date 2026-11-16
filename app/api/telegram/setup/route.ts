@@ -3,12 +3,6 @@ import { telegramWebhookSecret } from "@/lib/telegram-webhook-secret";
 
 export const dynamic = "force-dynamic";
 
-function runnerSecret() {
-  const value = process.env.INVOICE_RUNNER_SECRET;
-  if (!value) throw new Error("INVOICE_RUNNER_SECRET is not configured");
-  return value;
-}
-
 function telegramToken() {
   const value = process.env.TELEGRAM_BOT_TOKEN;
   if (!value) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
@@ -17,13 +11,14 @@ function telegramToken() {
 
 function authorized(request: NextRequest) {
   const header = request.headers.get("authorization") || "";
-  return header === `Bearer ${runnerSecret()}`;
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  return Boolean(secret && header === `Bearer ${secret}`);
 }
 
 async function configureWebhook(request: NextRequest) {
   const webhookUrl = `${request.nextUrl.origin}/api/telegram`;
   const secretToken = telegramWebhookSecret();
-  if (!secretToken) throw new Error("TELEGRAM_WEBHOOK_SECRET or INVOICE_RUNNER_SECRET is not configured");
+  if (!secretToken) throw new Error("TELEGRAM_WEBHOOK_SECRET is not configured");
 
   const setResponse = await fetch(`https://api.telegram.org/bot${telegramToken()}/setWebhook`, {
     method: "POST",
