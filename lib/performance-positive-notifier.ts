@@ -47,6 +47,16 @@ function creativeName(row: WinnerAlert) {
 }
 
 export async function notifyConfirmedWinnerCreatives() {
+  // Keep winners in the dashboard/digest, never push them at 02:00–03:00
+  // or on weekends. This check happens before notifications are marked sent.
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Kyiv", weekday: "short", hour: "2-digit", hour12: false,
+  }).formatToParts(new Date());
+  const clock = Object.fromEntries(parts.map((item) => [item.type, item.value]));
+  const hour = Number(clock.hour || 0);
+  if (clock.weekday === "Sat" || clock.weekday === "Sun" || hour < 9 || hour >= 21) {
+    return { sent: 0, skipped: "quiet_hours_or_weekend_kyiv" };
+  }
   const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
   const [rows, configs] = await Promise.all([
     request<WinnerAlert[]>(`performance_alerts?select=id,meta_account_id,title,details,last_seen_at,resolved_at&alert_type=eq.CREATIVE_WINNER_V4&resolved_at=is.null&last_seen_at=gte.${encodeURIComponent(since)}&order=last_seen_at.desc&limit=50`),
