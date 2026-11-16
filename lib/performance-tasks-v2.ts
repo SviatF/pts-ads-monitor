@@ -94,6 +94,20 @@ async function sendGrouped(reminder: boolean) {
   const { alerts, configs } = await loadData();
   const weekend = isWeekend();
   if (reminder && weekend) return { tasks: 0, targetologists: 0, skipped: "weekend" };
+  if (weekend) {
+    // ONE quiet weekend digest per day. Do not fan out alerts by owner or
+    // repeat the full outstanding task list in group Telegram.
+    const open = alerts.filter((alert) => configs.some((c) => c.meta_account_id === alert.meta_account_id));
+    const critical = open.filter((alert) => alert.severity === "critical").length;
+    await sendTelegramToChat(chatId,
+      "🏖 <b>Гарних вихідних, командо!</b>\n\n" +
+      (open.length
+        ? `Є <b>${open.length}</b> відкритих задач${critical ? ` (із них критичних: ${critical})` : ""}. Вони залишаються у PTS Tasks — без окремих нагадувань і списків на вихідних.`
+        : "Відкритих задач немає — відпочивайте спокійно.") +
+      "\n\nУ понеділок повернемося до робочого ритму. Приємного відпочинку! 🌿"
+    );
+    return { tasks: open.length, targetologists: 0, weekend: true, messages: 1 };
+  }
 
   const configByAccount = new Map(configs.map((c) => [c.meta_account_id, c]));
   const grouped = new Map<string, AlertRow[]>();
