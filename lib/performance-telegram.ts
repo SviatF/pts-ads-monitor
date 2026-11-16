@@ -1,4 +1,4 @@
-import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/telegram-messages";
 
 export function performanceChatId() {
   return process.env.PERFORMANCE_TELEGRAM_CHAT_ID?.trim() || "";
