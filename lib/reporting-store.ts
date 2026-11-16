@@ -1,4 +1,4 @@
-import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/telegram-messages";
 import { upsertPerformanceMonitoringConfig } from "@/lib/performance-config-store";
 
 export type ReportingConfig = {
