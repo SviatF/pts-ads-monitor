@@ -3,7 +3,7 @@ import { getPerformanceMonitoringConfig } from "@/lib/performance-config-store";
 import { getGoogleUserAccessToken } from "@/lib/google-oauth";
 import { dailyBlocksForDays } from "@/lib/report-template";
 import { dayIndexInPeriod, periodForDate, periodLength } from "@/lib/report-periods";
-import { escapeTelegramHtml } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml } from "@/lib/telegram-messages";
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v26.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
