@@ -1,5 +1,5 @@
 export function telegramWebhookSecret() {
-  const raw = process.env.TELEGRAM_WEBHOOK_SECRET || process.env.INVOICE_RUNNER_SECRET;
+  const raw = process.env.TELEGRAM_WEBHOOK_SECRET;
   if (!raw) return null;
 
   const safe = raw
