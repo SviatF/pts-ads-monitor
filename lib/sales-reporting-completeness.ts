@@ -2,7 +2,7 @@ import { listReportingConfigs } from "@/lib/reporting-store";
 import { getGoogleUserAccessToken } from "@/lib/google-oauth";
 import { dailyBlocksForDays } from "@/lib/report-template";
 import { dayIndexInPeriod, periodForDate, periodLength } from "@/lib/report-periods";
-import { escapeTelegramHtml } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml } from "@/lib/telegram-messages";
 import { sendPerformanceMessage } from "@/lib/performance-telegram";
 
 function kyivDate() {
