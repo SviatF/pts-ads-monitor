@@ -46,11 +46,11 @@ export default {
     hydrateProcessEnv(env);
     const tasks: Promise<unknown>[] = [
       callInternal("/api/monitor", env, ctx),
-      // Personal PTS Tasks bot: deadlines + morning/evening direct-message digests.
-      // Cron already runs every 10 minutes, which is enough precision for task reminders.
-      callInternal("/api/tasks-bot/reminders", env, ctx),
+      // Cron still runs monitoring every ten minutes; personal reminders run only on weekdays.
     ];
     const { hour, minute, weekday } = kyivClock();
+    const weekend = weekday === "Sat" || weekday === "Sun";
+    if (!weekend) tasks.push(callInternal("/api/tasks-bot/reminders", env, ctx));
 
     // Performance Control runs every 20 minutes (HH:00 / HH:20 / HH:40).
     // We intentionally run the full ruleset for now so fast checks cannot miss
@@ -63,7 +63,7 @@ export default {
     // Management escalation: once per hour, offset from the performance check
     // so both heavier jobs are not started on the same cron tick.
     // Weekend filtering is handled by the endpoint.
-    if (minute >= 30 && minute < 40) {
+    if (!weekend && minute >= 30 && minute < 40) {
       tasks.push(callInternal("/api/performance/management?kind=escalations", env, ctx));
     }
 
@@ -85,10 +85,10 @@ export default {
     }
 
     // Internal team briefs: morning priorities + end-of-day accountability.
-    if (hour === 10 && minute < 10) {
+    if (!weekend && hour === 10 && minute < 10) {
       tasks.push(callInternal("/api/performance/brief?kind=morning", env, ctx));
     }
-    if (hour === 19 && minute < 10) {
+    if (!weekend && hour === 19 && minute < 10) {
       tasks.push(callInternal("/api/performance/brief?kind=evening", env, ctx));
     }
 
