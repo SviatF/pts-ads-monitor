@@ -1,4 +1,4 @@
-import { escapeTelegramHtml } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml } from "@/lib/telegram-messages";
 
 export type TasksBotInlineButton = {
   text: string;
