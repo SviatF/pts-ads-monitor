@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { listReportingConfigs } from "@/lib/reporting-store";
 import { runReportingSync } from "@/lib/reporting-runner";
 import { listReportingTelegramSubscriptionsForAccount } from "@/lib/reporting-telegram-store";
-import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/telegram-messages";
 import { formatCurrencyAmount, normalizeReportingCurrency } from "@/lib/report-currency";
 
 export const dynamic = "force-dynamic";
