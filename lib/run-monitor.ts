@@ -29,6 +29,15 @@ export type MonitorResult = {
   errors: string[];
 };
 
+function telegramPushWindowOpen() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Kyiv", hour: "2-digit", weekday: "short", hour12: false,
+  }).formatToParts(new Date());
+  const clock = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  const h = Number(clock.hour || 0);
+  return clock.weekday !== "Sat" && clock.weekday !== "Sun" && h >= 9 && h < 21;
+}
+
 export async function runMonitor(): Promise<MonitorResult> {
   const startedAt = new Date().toISOString();
   const [accounts, endedProjects] = await Promise.all([
@@ -83,7 +92,7 @@ export async function runMonitor(): Promise<MonitorResult> {
 
   await upsertAccounts(rows);
 
-  for (const message of accountAlerts) {
+  for (const message of telegramPushWindowOpen() ? accountAlerts : []) {
     try {
       await sendTelegram(message);
       result.accountAlerts++;
@@ -161,7 +170,7 @@ export async function runMonitor(): Promise<MonitorResult> {
     result.errors.push(`Rejected ads storage: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  for (const alert of rejectAlerts) {
+  for (const alert of telegramPushWindowOpen() ? rejectAlerts : []) {
     try {
       await sendTelegram(rejectedAdsMessage(alert.accountName, alert.accountId, alert.names));
       result.rejectedAlerts += alert.names.length;
