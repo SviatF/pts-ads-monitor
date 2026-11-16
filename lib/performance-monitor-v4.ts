@@ -1,6 +1,6 @@
 import { listReportingConfigs, type ReportingConfig } from "@/lib/reporting-store";
 import { listPerformanceMonitoringConfigs, type PerformanceMonitoringConfig } from "@/lib/performance-config-store";
-import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/telegram-messages";
 import { getGoogleUserAccessToken } from "@/lib/google-oauth";
 import { dailyBlocksForDays } from "@/lib/report-template";
 import { dayIndexInPeriod, periodForDate, periodLength } from "@/lib/report-periods";
