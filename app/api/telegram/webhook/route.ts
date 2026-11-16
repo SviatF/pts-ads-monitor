@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
   const supplied = request.headers.get("x-telegram-bot-api-secret-token") || "";
   if (supplied !== safeSecret) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const rawSecret = process.env.TELEGRAM_WEBHOOK_SECRET || process.env.INVOICE_RUNNER_SECRET;
+  const rawSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
   if (!rawSecret) return NextResponse.json({ error: "Raw webhook secret is not configured" }, { status: 500 });
 
   const body = await request.text();
