@@ -5,7 +5,7 @@ import {
   listReportingTelegramSubscriptions,
   upsertReportingTelegramSubscription,
 } from "@/lib/reporting-telegram-store";
-import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/invoice-telegram";
+import { escapeTelegramHtml, sendTelegramToChat } from "@/lib/telegram-messages";
 import { acknowledgePerformanceAlert, resolvePerformanceAlert, addPerformanceAlertNote } from "@/lib/performance-alert-store";
 import { runPerformanceMonitor } from "@/lib/performance-monitor-v4";
 import { formatCurrencyAmount } from "@/lib/report-currency";
