@@ -42,24 +42,3 @@ export async function answerTelegramCallback(callbackQueryId: string, text: stri
   const body = await response.json();
   if (!response.ok || !body.ok) throw new Error(body.description || "Telegram answerCallbackQuery failed");
 }
-
-export async function sendInvoicePdfToChat(input: {
-  chatId: string;
-  fileName: string;
-  pdf: Blob;
-  caption: string;
-}) {
-  const form = new FormData();
-  form.set("chat_id", input.chatId);
-  form.set("caption", input.caption);
-  form.set("parse_mode", "HTML");
-  form.set("document", input.pdf, input.fileName);
-
-  const response = await fetch(`https://api.telegram.org/bot${botToken()}/sendDocument`, {
-    method: "POST",
-    body: form,
-  });
-  const body = await response.json();
-  if (!response.ok || !body.ok) throw new Error(body.description || "Telegram sendDocument failed");
-  return body.result;
-}
